@@ -26,7 +26,10 @@ yarn-debug.log*
 yarn-error.log*
 
 # local env files
+.env
 .env*.local
+# Keep .env.example files for reference
+!.env*.example
 
 # vercel
 .vercel
@@ -34,4 +37,27 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# PDF files (especially in root directory - client specs, product specs, etc.)
+*.pdf
+
+# Google client secrets and credentials
+client_secret_*.json
+
+# Swap files
+*.swp
+*.swo
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+Thumbs.db
+
+# Logs
+*.log
+logs/
 
