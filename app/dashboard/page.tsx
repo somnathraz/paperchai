@@ -4,6 +4,15 @@ import { authOptions } from "@/lib/auth";
 import { DashboardLayout } from "@/components/dashboard/layout-shell";
 import { DashboardTabNav } from "@/components/dashboard/dashboard-tabs";
 import { FabActions } from "@/components/dashboard/fab-actions";
+import { generateMetadata as genMeta } from "@/lib/seo-config";
+
+export const metadata = genMeta({
+  title: "Dashboard - Invoice Management",
+  description:
+    "Your freelance invoice command center. View unpaid invoices, client reliability scores, payment reminders, and cash flow insights.",
+  path: "/dashboard",
+  noIndex: true,
+});
 
 // Import all server components
 import { StatsCards } from "@/features/dashboard/components/StatsCards";
@@ -30,19 +39,21 @@ export default async function DashboardPage({ searchParams }: Props) {
     redirect("/login?callbackUrl=/dashboard");
   }
 
-  const firstName = session.user?.name?.split(" ")[0] ?? session.user?.email?.split("@")[0] ?? "there";
+  const firstName =
+    session.user?.name?.split(" ")[0] ?? session.user?.email?.split("@")[0] ?? "there";
   const activeTab = searchParams.tab || "overview";
 
   return (
     <DashboardLayout userName={session.user?.name} userEmail={session.user?.email}>
       {/* Mobile-first centered container */}
       <div className="mx-auto w-full max-w-6xl space-y-6 pt-4 sm:pt-6 lg:px-8">
-
         {/* Responsive Header: Stacked on mobile, Flex on desktop */}
         <div className="flex flex-col gap-4 px-4 sm:flex-row sm:items-center sm:justify-between sm:px-0">
           <div className="space-y-1">
             <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Dashboard</p>
-            <h1 className="text-2xl font-bold leading-tight sm:text-3xl lg:text-4xl">Welcome back, {firstName}.</h1>
+            <h1 className="text-2xl font-bold leading-tight sm:text-3xl lg:text-4xl">
+              Welcome back, {firstName}.
+            </h1>
             <p className="text-sm text-muted-foreground sm:text-base">
               Money autopilot is live. Track payouts, reliability, and reminders.
             </p>

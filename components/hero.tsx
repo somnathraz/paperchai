@@ -55,7 +55,7 @@ export default function Hero() {
   return (
     <section
       ref={ref}
-      className="relative overflow-hidden pt-8 pb-16 md:pt-12 md:pb-20 mb-0 md:mb-4"
+      className="relative overflow-hidden pt-20 sm:pt-24 md:pt-28 lg:pt-8 pb-12 sm:pb-16 md:pb-20 mb-0 md:mb-4"
     >
       {/* -------------------------------------------------- */}
       {/* BACKGROUND → Clean, Premium, Real SaaS */}
@@ -85,17 +85,17 @@ export default function Hero() {
       {/* -------------------------------------------------- */}
       {/* GRID */}
       {/* -------------------------------------------------- */}
-      <div className="relative z-10 shell grid lg:grid-cols-2 gap-14 items-center">
+      <div className="relative z-10 shell grid lg:grid-cols-2 gap-8 sm:gap-10 md:gap-14 items-center">
         {/* -------------------------------------------------- */}
         {/* LEFT */}
         {/* -------------------------------------------------- */}
-        <div className="space-y-8">
+        <div className="space-y-6 sm:space-y-8">
           {/* Badge */}
           <motion.div
             initial={{ y: 20, opacity: 0 }}
             animate={inView ? { y: 0, opacity: 1 } : {}}
             transition={{ duration: 0.6 }}
-            className="inline-flex items-center gap-2 px-5 py-2 rounded-full border border-white/30 bg-white/70 backdrop-blur-xl text-[11px] font-semibold uppercase tracking-[0.22em] shadow-lg"
+            className="inline-flex items-center gap-2 px-4 sm:px-5 py-2 rounded-full border border-white/30 bg-white/70 backdrop-blur-xl text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.20em] sm:tracking-[0.22em] shadow-lg"
           >
             PaperChai · Money Autopilot
           </motion.div>
@@ -105,12 +105,12 @@ export default function Hero() {
             initial={{ y: 30, opacity: 0 }}
             animate={inView ? { y: 0, opacity: 1 } : {}}
             transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-            className="text-5xl md:text-6xl font-extrabold leading-[1.05] tracking-tight"
+            className="text-4xl sm:text-5xl md:text-6xl font-extrabold leading-[1.05] tracking-tight"
           >
             <span className="block bg-gradient-to-b from-foreground via-foreground/90 to-foreground/70 bg-clip-text text-transparent">
               Stop chasing clients.
             </span>
-            <span className="block mt-3 bg-gradient-to-r from-primary via-emerald-500 to-primary bg-clip-text text-transparent">
+            <span className="block mt-2 sm:mt-3 bg-gradient-to-r from-primary via-emerald-500 to-primary bg-clip-text text-transparent">
               Start tracking them like a pro.
             </span>
           </motion.h1>
@@ -120,15 +120,15 @@ export default function Hero() {
             initial={{ opacity: 0, y: 20 }}
             animate={inView ? { opacity: 1, y: 0 } : {}}
             transition={{ delay: 0.15, duration: 0.55 }}
-            className="text-lg md:text-xl text-neutral-600 max-w-xl leading-relaxed"
+            className="text-base sm:text-lg md:text-xl text-neutral-600 max-w-xl leading-relaxed"
           >
-            PaperChai shows who pays on time, who delays, and sends smart email +
-            WhatsApp reminders in your exact tone.
+            PaperChai shows who pays on time, who delays, and sends smart email + WhatsApp reminders
+            in your exact tone.
           </motion.p>
 
           {/* CTAs */}
           <motion.div
-            className="flex flex-col sm:flex-row gap-4 pt-4"
+            className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-2 sm:pt-4"
             initial={{ opacity: 0, y: 20 }}
             animate={inView ? { opacity: 1, y: 0 } : {}}
             transition={{ delay: 0.22, duration: 0.6 }}
@@ -137,10 +137,10 @@ export default function Hero() {
             <motion.button
               whileHover={{ scale: 1.05, y: -2 }}
               whileTap={{ scale: 0.97 }}
-              className="relative group flex items-center gap-2 rounded-full px-8 py-4 bg-gradient-to-r from-primary via-emerald-500 to-primary text-white font-semibold shadow-[0_8px_32px_rgba(16,185,129,0.45)]"
+              className="relative group flex items-center justify-center gap-2 rounded-full px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-r from-primary via-emerald-500 to-primary text-white font-semibold shadow-[0_8px_32px_rgba(16,185,129,0.45)] text-sm sm:text-base"
             >
               <span className="relative z-10">Get started free</span>
-              <ArrowRight className="relative z-10 h-5 w-5 group-hover:translate-x-1 transition" />
+              <ArrowRight className="relative z-10 h-4 w-4 sm:h-5 sm:w-5 group-hover:translate-x-1 transition" />
               {/* Shine */}
               <motion.div
                 className="absolute inset-0 bg-gradient-to-r from-transparent via-white/35 to-transparent rounded-full"
@@ -154,9 +154,9 @@ export default function Hero() {
             <motion.button
               whileHover={{ scale: 1.05, y: -2 }}
               whileTap={{ scale: 0.97 }}
-              className="relative flex items-center gap-2 rounded-full px-8 py-4 bg-white/70 backdrop-blur-xl border border-white/40 shadow-lg font-semibold text-foreground"
+              className="relative flex items-center justify-center gap-2 rounded-full px-6 sm:px-8 py-3 sm:py-4 bg-white/70 backdrop-blur-xl border border-white/40 shadow-lg font-semibold text-foreground text-sm sm:text-base"
             >
-              <PlayCircle className="h-5 w-5 text-primary" />
+              <PlayCircle className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
               Watch 30s demo
             </motion.button>
           </motion.div>
@@ -214,12 +214,12 @@ export default function Hero() {
             </motion.div>
           ))}
 
-           {/* Dashboard - lowered by 15px more for better spacing */}
-           <motion.div
-             onMouseMove={onMove}
-             onMouseLeave={onLeave}
-             style={{ rotateX: rX, rotateY: rY }}
-             className="relative mt-20 overflow-hidden rounded-[30px] border border-white/40 bg-white/10 shadow-[0_40px_80px_-20px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
+          {/* Dashboard - lowered by 15px more for better spacing */}
+          <motion.div
+            onMouseMove={onMove}
+            onMouseLeave={onLeave}
+            style={{ rotateX: rX, rotateY: rY }}
+            className="relative mt-20 overflow-hidden rounded-[30px] border border-white/40 bg-white/10 shadow-[0_40px_80px_-20px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
             initial={{ opacity: 0, scale: 0.94, y: 40 }}
             animate={inView ? { opacity: 1, scale: 1, y: 0 } : {}}
             transition={{ duration: 0.8, delay: 0.2 }}

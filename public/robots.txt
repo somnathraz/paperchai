@@ -1,0 +1,28 @@
+# Robots.txt for PaperChai - Invoice Generator for Freelancers
+
+# Allow all crawlers to access public pages
+User-agent: *
+
+# Allow public marketing and auth pages
+Allow: /
+Allow: /login
+Allow: /signup
+
+# Disallow private user data and application pages
+Disallow: /dashboard
+Disallow: /invoices
+Disallow: /clients
+Disallow: /projects
+Disallow: /reminders
+Disallow: /automation
+Disallow: /settings
+Disallow: /admin
+Disallow: /api
+
+# Disallow password reset and verification pages
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /verify-email
+
+# Sitemap location
+Sitemap: https://paperchai.com/sitemap.xml
