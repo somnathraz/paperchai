@@ -1,4 +1,4 @@
-# Invoice App
+# paperchai
 
 A Next.js application with shadcn/ui components.
 
@@ -44,4 +44,3 @@ npx shadcn@latest add card
 
 - [Next.js Documentation](https://nextjs.org/docs)
 - [shadcn/ui Documentation](https://ui.shadcn.com)
-
