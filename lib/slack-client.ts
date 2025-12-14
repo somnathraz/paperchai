@@ -63,23 +63,29 @@ export function verifySlackSignature(
 /**
  * Generate OAuth state token (CSRF protection)
  */
-export function generateOAuthState(workspaceId: string): string {
+/**
+ * Generate OAuth state token (CSRF protection)
+ */
+export function generateOAuthState(workspaceId: string, redirectTo?: string): string {
     const timestamp = Date.now();
     const random = crypto.randomBytes(16).toString("hex");
-    const payload = JSON.stringify({ workspaceId, timestamp, random });
+    const payload = JSON.stringify({ workspaceId, timestamp, random, redirectTo });
     return encrypt(payload);
 }
 
 /**
  * Verify and decode OAuth state token
  */
+/**
+ * Verify and decode OAuth state token
+ */
 export function verifyOAuthState(
     state: string,
     maxAgeMs: number = 10 * 60 * 1000 // 10 minutes
-): { workspaceId: string; timestamp: number } | null {
+): { workspaceId: string; timestamp: number; redirectTo?: string } | null {
     try {
         const payload = decrypt(state);
-        const { workspaceId, timestamp } = JSON.parse(payload);
+        const { workspaceId, timestamp, redirectTo } = JSON.parse(payload);
 
         // Check expiration
         if (Date.now() - timestamp > maxAgeMs) {
@@ -87,7 +93,7 @@ export function verifyOAuthState(
             return null;
         }
 
-        return { workspaceId, timestamp };
+        return { workspaceId, timestamp, redirectTo };
     } catch (error) {
         console.error("[Slack] Invalid OAuth state:", error);
         return null;

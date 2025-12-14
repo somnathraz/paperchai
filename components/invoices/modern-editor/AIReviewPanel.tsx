@@ -287,7 +287,7 @@ export function AIReviewPanel({
                 ) : (
                     <div className="flex flex-col items-center justify-center h-64 gap-4 text-center px-8">
                         <Sparkles className="h-12 w-12 text-slate-300" />
-                        <p className="text-sm text-slate-500">Click "AI Review" to analyze your invoice</p>
+                        <p className="text-sm text-slate-500">Click &quot;AI Review&quot; to analyze your invoice</p>
                     </div>
                 )}
             </div>

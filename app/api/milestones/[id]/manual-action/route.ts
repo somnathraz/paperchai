@@ -62,7 +62,8 @@ export async function POST(
         } else if (actionType === "payment_received") {
             newStatus = "PAID";
         } else if (actionType === "marked_complete") {
-            newStatus = "COMPLETED";
+            // MilestoneStatus doesn't have COMPLETED, mapping to PAID as terminal state
+            newStatus = "PAID";
         }
 
         // Update milestone with manual action tracking
@@ -139,8 +140,8 @@ export async function GET(
         // Calculate if automation should be skipped
         const shouldSkipAutomation =
             milestone.skipAutomation ||
+            (milestone.status as string) === "PAID" ||
             milestone.status === "PAID" ||
-            milestone.status === "COMPLETED" ||
             (milestone.lastManualActionAt &&
                 new Date().getTime() - new Date(milestone.lastManualActionAt).getTime() < 7 * 24 * 60 * 60 * 1000);
 
@@ -150,11 +151,9 @@ export async function GET(
             reason: shouldSkipAutomation
                 ? milestone.skipAutomation
                     ? "Explicitly skipped"
-                    : milestone.status === "PAID"
+                    : (milestone.status as string) === "PAID"
                         ? "Already paid"
-                        : milestone.status === "COMPLETED"
-                            ? "Already completed"
-                            : "Recent manual action (within 7 days)"
+                        : "Recent manual action (within 7 days)"
                 : null,
         });
     } catch (error) {

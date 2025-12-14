@@ -43,10 +43,13 @@ async function throttledFetch(url: string, options: RequestInit): Promise<Respon
 /**
  * Generate OAuth state token (CSRF protection)
  */
-export function generateOAuthState(workspaceId: string): string {
+/**
+ * Generate OAuth state token (CSRF protection)
+ */
+export function generateOAuthState(workspaceId: string, redirectTo?: string): string {
     const timestamp = Date.now();
     const random = crypto.randomBytes(16).toString("hex");
-    const payload = JSON.stringify({ workspaceId, timestamp, random, provider: "notion" });
+    const payload = JSON.stringify({ workspaceId, timestamp, random, provider: "notion", redirectTo });
     return encrypt(payload);
 }
 
@@ -56,10 +59,10 @@ export function generateOAuthState(workspaceId: string): string {
 export function verifyOAuthState(
     state: string,
     maxAgeMs: number = 10 * 60 * 1000 // 10 minutes
-): { workspaceId: string; timestamp: number } | null {
+): { workspaceId: string; timestamp: number; redirectTo?: string } | null {
     try {
         const payload = decrypt(state);
-        const { workspaceId, timestamp, provider } = JSON.parse(payload);
+        const { workspaceId, timestamp, provider, redirectTo } = JSON.parse(payload);
 
         // Verify it's a Notion state
         if (provider !== "notion") {
@@ -73,7 +76,7 @@ export function verifyOAuthState(
             return null;
         }
 
-        return { workspaceId, timestamp };
+        return { workspaceId, timestamp, redirectTo };
     } catch (error) {
         console.error("[Notion] Invalid OAuth state:", error);
         return null;

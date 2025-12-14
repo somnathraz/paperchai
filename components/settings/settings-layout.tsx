@@ -25,9 +25,9 @@ export function SettingsLayout({ current, title, description, children }: Settin
     <div className="min-h-screen bg-gradient-to-b from-white via-[#f7fafc] to-[#ecf2f7] px-4 sm:px-6 lg:px-8 py-6 sm:py-12">
       <div className="mx-auto w-full max-w-5xl">
         {/* Mobile: stacked, Desktop: 2-column grid */}
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,0.9fr)_minmax(0,2fr)]">
-          {/* Settings Nav - hidden on mobile */}
-          <div className="w-full">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,0.9fr)_minmax(0,2fr)] items-start">
+          {/* Settings Nav - hidden on mobile by component, but we add sticky wrapper logic here for desktop */}
+          <div className="w-full hidden md:block sticky top-24 self-start max-h-[calc(100vh-8rem)] overflow-y-auto no-scrollbar">
             <SettingsSidebar current={current} />
           </div>
 
@@ -121,8 +121,8 @@ export function SettingsLayout({ current, title, description, children }: Settin
               type="button"
               onClick={() => router.push('/settings/profile')}
               className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition ${current === '/settings/profile'
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                ? 'bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
             >
               <User className="h-3 w-3" />
@@ -132,8 +132,8 @@ export function SettingsLayout({ current, title, description, children }: Settin
               type="button"
               onClick={() => router.push('/settings/reminders')}
               className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition ${current === '/settings/reminders'
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                ? 'bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
             >
               <Bell className="h-3 w-3" />
@@ -143,8 +143,8 @@ export function SettingsLayout({ current, title, description, children }: Settin
               type="button"
               onClick={() => router.push('/settings/billing')}
               className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition ${current === '/settings/billing'
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                ? 'bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
             >
               <CreditCard className="h-3 w-3" />

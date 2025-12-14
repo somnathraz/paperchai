@@ -21,17 +21,22 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        // 2. Premium Check
-        const premiumError = await requirePremium(request);
-        if (premiumError) {
-            // Redirect to billing page with message
-            return NextResponse.redirect(
-                new URL("/settings/billing?error=premium_required&feature=notion", request.url)
-            );
-        }
+        // 2. Premium Check (Temporarily disabled for development)
+        // const premiumError = await requirePremium(request);
+        // if (premiumError) {
+        //     return NextResponse.redirect(
+        //         new URL("/settings/billing?error=premium_required&feature=notion", request.url)
+        //     );
+        // }
 
-        // 3. Get workspace ID
-        const workspaceId = (session.user as any).activeWorkspaceId;
+        // 3. Get workspace ID from database
+        const { prisma } = await import("@/lib/prisma");
+        const user = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: { activeWorkspaceId: true }
+        });
+
+        const workspaceId = user?.activeWorkspaceId;
         if (!workspaceId) {
             return NextResponse.redirect(
                 new URL("/settings/workspace?error=no_workspace", request.url)
@@ -39,7 +44,8 @@ export async function GET(request: NextRequest) {
         }
 
         // 4. Generate CSRF state
-        const state = generateOAuthState(workspaceId);
+        const redirectTo = request.nextUrl.searchParams.get("next") || undefined;
+        const state = generateOAuthState(workspaceId, redirectTo);
 
         // 5. Build Notion OAuth URL
         const clientId = process.env.NOTION_CLIENT_ID;

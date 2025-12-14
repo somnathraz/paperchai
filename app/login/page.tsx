@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { signIn } from "next-auth/react";
+import { useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { Mail, Lock, ShieldCheck, AlertCircle } from "lucide-react";
+import { useAuth, useAuthRedirect } from "@/features/auth/hooks";
+import { validateEmail } from "@/features/auth/utils";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { AuthHeader } from "@/components/auth/AuthHeader";
@@ -22,96 +22,58 @@ const quickFacts = [
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(0);
-  const router = useRouter();
 
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  // Use Redux auth state and actions
+  const { login, loginWithGoogle, resendVerification, isLoading, error, status, clearError, clearStatus } = useAuth();
 
-  const handleGoogle = async () => {
-    setError(null);
-    setStatus(null);
-    setLoading(true);
-    try {
-      await signIn("google", { callbackUrl: "/dashboard" });
-    } catch {
-      setError("Google sign-in failed. Please try again.");
-      setLoading(false);
-    }
-  };
+  // Auto-redirect if already authenticated
+  useAuthRedirect();
 
-  const handleCredentials = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setStatus(null);
-    if (!emailRegex.test(email.trim())) {
-      setError("Enter a valid email.");
-      return;
-    }
-    if (!password) {
-      setError("Enter your password.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await signIn("credentials", { email, password, redirect: false, callbackUrl: "/dashboard" });
-      if (res?.error) {
-        const message =
-          res.error === "Account not found"
-            ? "No account found for this email."
-            : res.error === "Use Google sign-in for this account"
-              ? "This account uses Google sign-in. Please continue with Google."
-              : res.error === "Missing credentials"
-                ? "Enter your email and password."
-                : res.error === "Invalid credentials"
-                  ? "Invalid email or password."
-                  : res.error === "Verify email to continue"
-                    ? "Please verify your email before signing in."
-                  : "Could not sign in. Please try again.";
-        setError(message);
-        setFailedAttempts((prev) => prev + 1);
-      } else {
+  // Memoized validation - avoid re-computing on every render
+  const isEmailValid = useMemo(() => validateEmail(email), [email]);
+  const canSubmit = useMemo(() => isEmailValid && password.length > 0, [isEmailValid, password]);
+
+  // useCallback for event handlers - stable references, prevent re-renders
+  const handleGoogle = useCallback(async () => {
+    clearError();
+    clearStatus();
+    await loginWithGoogle();
+  }, [loginWithGoogle, clearError, clearStatus]);
+
+  const handleCredentials = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      clearError();
+      clearStatus();
+
+      if (!isEmailValid || !password) {
+        return;
+      }
+
+      const result = await login(email, password);
+
+      if (!result.type.includes("rejected")) {
         setFailedAttempts(0);
-        router.push("/dashboard");
+      } else {
+        setFailedAttempts((prev) => prev + 1);
       }
-    } catch {
-      setError("Could not sign in. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [email, password, isEmailValid, login, clearError, clearStatus]
+  );
 
-  const handleResendVerification = async () => {
-    setError(null);
-    setStatus(null);
-    if (!emailRegex.test(email.trim())) {
-      setError("Enter a valid email to resend verification.");
+  const handleResendVerification = useCallback(async () => {
+    if (!isEmailValid) {
       return;
     }
-    setLoading(true);
-    try {
-      const res = await fetch("/api/auth/request-verification", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || "Could not send verification email.");
-      } else {
-        setStatus("Verification link sent. Check your email.");
-        if (data.verifyUrl) {
-          setStatus(`Verification link (dev): ${data.verifyUrl}`);
-        }
-      }
-    } catch {
-      setError("Could not send verification email.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    await resendVerification(email);
+  }, [email, isEmailValid, resendVerification]);
+
+  // Memoize whether to show resend button
+  const showResendButton = useMemo(
+    () => failedAttempts >= 2 || (error && error.toLowerCase().includes("verify")),
+    [failedAttempts, error]
+  );
 
   return (
     <AuthLayout
@@ -124,7 +86,7 @@ export default function LoginPage() {
         <AuthHeader title="PaperChai workspace" subtitle="Welcome back" />
 
         <div className="space-y-4">
-          <GoogleButton label="Continue with Google" onClick={handleGoogle} disabled={loading} />
+          <GoogleButton label="Continue with Google" onClick={handleGoogle} disabled={isLoading} />
 
           <DividerLine />
 
@@ -136,7 +98,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@paperchai.com"
-              disabled={loading}
+              disabled={isLoading}
               autoComplete="email"
             />
             <InputField
@@ -146,7 +108,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              disabled={loading}
+              disabled={isLoading}
               autoComplete="current-password"
             />
 
@@ -172,8 +134,8 @@ export default function LoginPage() {
               </div>
             )}
 
-            <PrimaryButton type="submit" icon={<ShieldCheck className="h-4 w-4" />} disabled={loading}>
-              {loading ? "Signing in..." : "Sign in"}
+            <PrimaryButton type="submit" icon={<ShieldCheck className="h-4 w-4" />} disabled={isLoading || !canSubmit}>
+              {isLoading ? "Signing in..." : "Sign in"}
             </PrimaryButton>
 
             <div className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-border/50 bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
@@ -191,13 +153,13 @@ export default function LoginPage() {
               Create an account
             </Link>
           </p>
-          {(failedAttempts >= 2 || (error && error.toLowerCase().includes("verify"))) && (
+          {showResendButton && (
             <div className="text-center">
               <button
                 type="button"
                 onClick={handleResendVerification}
                 className="text-sm font-semibold text-primary underline-offset-4 hover:underline disabled:opacity-60"
-                disabled={loading}
+                disabled={isLoading}
               >
                 Resend verification email
               </button>

@@ -102,7 +102,7 @@ export async function POST(
         const documents = await prisma.projectDocument.findMany({
             where: {
                 projectId,
-                aiStatus: "COMPLETE", // Only analyze documents that have been processed
+                aiStatus: "PROCESSED", // Only analyze documents that have been processed
             },
             select: {
                 id: true,
@@ -150,9 +150,11 @@ Content: ${extract?.rawText || extract?.content || JSON.stringify(extract) || "N
         const result = await generateContentSafe({
             modelName: AI_CONFIG.features.extraction.model,
             fallbackModelName: AI_CONFIG.features.extraction.fallback,
-            prompt,
-            temperature: AI_CONFIG.features.extraction.temperature,
-            maxOutputTokens: 4096,
+            promptParts: [prompt],
+            generationConfig: {
+                temperature: AI_CONFIG.features.extraction.temperature,
+                maxOutputTokens: 4096,
+            },
             userId: session.user.id,
         });
 

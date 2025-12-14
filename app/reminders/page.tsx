@@ -2,11 +2,11 @@ import { DashboardLayout } from "@/components/dashboard/layout-shell";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { Queue } from "@/components/dashboard/reminders/queue";
-import { UpcomingReminders } from "@/components/dashboard/reminders/upcoming";
-import { HealthStats } from "@/components/dashboard/reminders/health-stats";
-import { Failures } from "@/components/dashboard/reminders/failures";
-import { Filters } from "@/components/dashboard/reminders/filters";
+import { Queue } from "@/features/reminders/components/queue";
+import { UpcomingReminders } from "@/features/reminders/components/upcoming";
+import { HealthStats } from "@/features/reminders/components/health-stats";
+import { Failures } from "@/features/reminders/components/failures";
+import { Filters } from "@/features/reminders/components/filters";
 
 export default async function RemindersPage() {
     const session = await getServerSession(authOptions);

@@ -127,7 +127,7 @@ type SettingsSidebarProps = {
 
 export function SettingsSidebar({ current }: SettingsSidebarProps) {
   return (
-    <aside className="hidden md:block rounded-2xl border border-white/20 bg-white/80 p-3 sm:p-4 shadow-[0_26px_120px_-70px_rgba(0,0,0,0.45)] backdrop-blur-2xl md:sticky md:top-6">
+    <aside className="hidden md:block rounded-2xl border border-white/20 bg-white/80 p-3 sm:p-4 shadow-[0_26px_120px_-70px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
       {/* Header */}
       <div className="mb-3 pb-2 border-b border-border/40">
         <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Settings</p>

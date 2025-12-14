@@ -59,9 +59,7 @@ export default function DatabaseDocsPage() {
                 {/* Integrations */}
                 <section>
                     <h2 className="text-xl font-semibold mb-4">Integrations</h2>
-                    <p className="text-sm text-muted-foreground mb-4">
-                        Manages connections to third-party providers. Supports OAuth tokens and sync status.
-                    </p>
+                    <p className="text-sm text-muted-foreground">Stores encrypted OAuth tokens for Slack and Notion. Uses AES-256-GCM encryption with &quot;ENCRYPTION_KEY&quot; from environment. Supports OAuth tokens and sync status.</p>
                     <SchemaBlock content={`model IntegrationConnection {
   workspaceId     String
   provider        IntegrationProvider // SLACK, NOTION

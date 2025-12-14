@@ -2,20 +2,19 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { DashboardLayout } from "@/components/dashboard/layout-shell";
-import { SummaryBar } from "@/components/dashboard/summary-bar";
 import { DashboardTabNav } from "@/components/dashboard/dashboard-tabs";
 import { FabActions } from "@/components/dashboard/fab-actions";
 
 // Import all server components
-import { OverviewCards } from "@/components/dashboard/overview-cards";
-import { CashflowCard } from "@/components/dashboard/cashflow";
+import { StatsCards } from "@/features/dashboard/components/StatsCards";
+import { CashflowWidget } from "@/features/dashboard/components/CashflowWidget";
 import { AutomationLifecycle } from "@/components/dashboard/automation-lifecycle";
 import { RemindersTimeline } from "@/components/dashboard/reminders-timeline";
-import { InvoiceTable } from "@/components/dashboard/invoice-table";
+import { InvoiceTableWidget } from "@/features/dashboard/components/InvoiceTableWidget";
 import { ReliabilityRadar } from "@/components/dashboard/reliability-radar";
 import { ReliabilityTable } from "@/components/dashboard/reliability-table";
 import { ClientHealth } from "@/components/dashboard/client-health";
-import { ActivityFeed } from "@/components/dashboard/activity-feed";
+import { ActivityWidget } from "@/features/dashboard/components/ActivityWidget";
 import { Insights } from "@/components/dashboard/insights";
 import { IntegrationPanel } from "@/components/dashboard/integration-panel";
 import { IntegrationProvider } from "@/lib/hooks/use-integration";
@@ -58,11 +57,11 @@ export default async function DashboardPage({ searchParams }: Props) {
         <div className="min-h-[500px] px-4 sm:px-0">
           {activeTab === "overview" && (
             <div className="space-y-6">
-              <OverviewCards />
+              <StatsCards />
               <IntegrationProvider>
                 <IntegrationPanel />
               </IntegrationProvider>
-              <CashflowCard />
+              <CashflowWidget />
             </div>
           )}
 
@@ -75,7 +74,7 @@ export default async function DashboardPage({ searchParams }: Props) {
 
           {activeTab === "invoices" && (
             <div className="space-y-6">
-              <InvoiceTable />
+              <InvoiceTableWidget />
               <ReliabilityTable />
             </div>
           )}
@@ -92,7 +91,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           {activeTab === "activity" && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <ActivityFeed />
+                <ActivityWidget />
                 <Insights />
               </div>
             </div>
