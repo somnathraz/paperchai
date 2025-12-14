@@ -30,7 +30,8 @@ export async function POST(req: Request) {
     data: { activeWorkspaceId: workspaceId },
   });
 
-  cookies().set("paperchai_workspace", workspaceId, { httpOnly: true, path: "/" });
+  const cookieStore = await cookies();
+  cookieStore.set("paperchai_workspace", workspaceId, { httpOnly: true, path: "/" });
 
   return NextResponse.json({ success: true });
 }
