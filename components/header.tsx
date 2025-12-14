@@ -25,32 +25,34 @@ export default function Header() {
   return (
     <header
       className={cn(
-        "fixed top-0 z-50 w-full transition-all duration-300",
+        "fixed top-0 z-[100] w-full transition-all duration-300",
         scrolled ? "backdrop-blur-xl bg-white/40 border-b border-white/20" : "bg-transparent"
       )}
     >
-      <div className="mx-auto max-w-7xl px-6 md:px-10">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 md:px-10">
         {/* Container */}
         <motion.div
           initial={{ y: -16, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.4, ease: "easeOut" }}
           className={cn(
-            "mt-4 mb-4 flex items-center justify-between rounded-full px-6 py-3 transition-all",
+            "mt-3 mb-3 md:mt-4 md:mb-4 flex items-center justify-between rounded-full px-4 py-2.5 md:px-6 md:py-3 transition-all",
             "border border-white/20 bg-white/55 backdrop-blur-xl shadow-[0_6px_22px_rgba(0,0,0,0.06)]",
             scrolled && "shadow-[0_8px_28px_rgba(0,0,0,0.1)]"
           )}
         >
           {/* LOGO */}
-          <Link href="/" className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-300">
-              <span className="text-[10px] font-bold tracking-tight">●</span>
-            </div>
+          <Link href="/" className="flex items-center gap-2 md:gap-3">
+            <img
+              src="/favicon.png"
+              alt="PaperChai Icon"
+              className="h-8 w-8 md:h-10 md:w-10 rounded-lg md:rounded-xl"
+            />
             <div className="leading-tight">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-neutral-500 font-medium">
+              <p className="text-[10px] md:text-[11px] uppercase tracking-[0.16em] md:tracking-[0.18em] text-neutral-500 font-medium">
                 PaperChai
               </p>
-              <p className="text-[12px] font-semibold text-neutral-800">
+              <p className="text-[11px] md:text-[12px] font-semibold text-neutral-800 hidden sm:block">
                 Money Autopilot
               </p>
             </div>
@@ -72,7 +74,10 @@ export default function Header() {
 
           {/* CTA */}
           <div className="hidden md:flex">
-            <Link href="/login" className="group relative flex items-center gap-2 rounded-full bg-black text-white px-5 py-2.5 text-sm font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.2)] hover:shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition-all">
+            <Link
+              href="/login"
+              className="group relative flex items-center gap-2 rounded-full bg-black text-white px-5 py-2.5 text-sm font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.2)] hover:shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition-all"
+            >
               <span>Get early access</span>
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
             </Link>
@@ -81,7 +86,7 @@ export default function Header() {
           {/* MOBILE MENU BUTTON */}
           <button
             onClick={() => setOpen(true)}
-            className="md:hidden rounded-lg p-2 bg-white/60 border border-white/30 backdrop-blur-lg"
+            className="md:hidden rounded-lg p-1.5 bg-white/60 border border-white/30 backdrop-blur-lg"
           >
             <Menu className="h-5 w-5 text-neutral-900" />
           </button>
