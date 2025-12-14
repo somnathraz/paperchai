@@ -26,16 +26,16 @@ export async function DELETE(req: Request) {
 
     // Check if user is workspace owner
     if (workspace.ownerId !== user.id) {
-      return NextResponse.json({ error: "Only workspace owner can delete workspace" }, { status: 403 });
+      return NextResponse.json(
+        { error: "Only workspace owner can delete workspace" },
+        { status: 403 }
+      );
     }
 
     // Check for confirmation
     const body = await req.json();
     if (!body.confirm || body.confirm !== workspace.name) {
-      return NextResponse.json(
-        { error: "Workspace name confirmation required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Workspace name confirmation required" }, { status: 400 });
     }
 
     // Delete workspace (cascade will handle members)
@@ -44,7 +44,8 @@ export async function DELETE(req: Request) {
     });
 
     // Clear active workspace cookie
-    cookies().delete("paperchai_workspace");
+    const cookieStore = await cookies();
+    cookieStore.delete("paperchai_workspace");
 
     // Update user's activeWorkspaceId if it was this workspace
     if (user.activeWorkspaceId === workspace.id) {
@@ -59,7 +60,8 @@ export async function DELETE(req: Request) {
           where: { id: user.id },
           data: { activeWorkspaceId: otherMembership.workspaceId },
         });
-        cookies().set("paperchai_workspace", otherMembership.workspaceId, {
+        const cookieStore = await cookies();
+        cookieStore.set("paperchai_workspace", otherMembership.workspaceId, {
           httpOnly: true,
           path: "/",
         });
@@ -77,4 +79,3 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "Could not delete workspace" }, { status: 500 });
   }
 }
-

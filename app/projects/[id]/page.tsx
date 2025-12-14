@@ -6,27 +6,28 @@ import { DashboardLayout } from "@/components/dashboard/layout-shell";
 import { ProjectDetailWidget } from "@/features/projects/components/ProjectDetailWidget";
 
 type PageProps = {
-    params: {
-        id: string;
-    };
+  params: Promise<{
+    id: string;
+  }>;
 };
 
-export default async function ProjectDetailPage({ params }: PageProps) {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-        redirect("/login");
-    }
+export default async function ProjectDetailPage(props: PageProps) {
+  const params = await props.params;
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    redirect("/login");
+  }
 
-    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
-    if (!workspace) {
-        redirect("/dashboard");
-    }
+  const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+  if (!workspace) {
+    redirect("/dashboard");
+  }
 
-    // Server component only handles auth and passing ID. Data fetching is in Client Widget (Redux Gold Standard).
+  // Server component only handles auth and passing ID. Data fetching is in Client Widget (Redux Gold Standard).
 
-    return (
-        <DashboardLayout userName={session.user.name} userEmail={session.user.email}>
-            <ProjectDetailWidget projectId={params.id} />
-        </DashboardLayout>
-    );
+  return (
+    <DashboardLayout userName={session.user.name} userEmail={session.user.email}>
+      <ProjectDetailWidget projectId={params.id} />
+    </DashboardLayout>
+  );
 }

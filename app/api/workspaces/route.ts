@@ -19,8 +19,11 @@ export async function GET() {
     orderBy: { createdAt: "asc" },
   });
 
+  const cookieStore = await cookies();
   const activeWorkspaceId =
-    cookies().get("paperchai_workspace")?.value || session.user.workspaceId || memberships[0]?.workspaceId;
+    cookieStore.get("paperchai_workspace")?.value ||
+    session.user.workspaceId ||
+    memberships[0]?.workspaceId;
 
   return NextResponse.json({
     workspaces: memberships.map((membership) => ({
@@ -81,7 +84,8 @@ export async function POST(req: Request) {
       data: { activeWorkspaceId: workspace.id },
     });
 
-    cookies().set("paperchai_workspace", workspace.id, { httpOnly: true, path: "/" });
+    const cookieStore = await cookies();
+    cookieStore.set("paperchai_workspace", workspace.id, { httpOnly: true, path: "/" });
 
     return NextResponse.json({ success: true, workspace });
   } catch (error) {
