@@ -1,0 +1,761 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String?
+  password        String?
+  image           String?
+  role            String?   @default("Founder")
+  timezone        String?   @default("Asia/Kolkata")
+  currency        String?   @default("INR")
+  reminderTone    String?   @default("Warm + Polite")
+  backupEmail     String?
+  emailVerified   DateTime?
+  activeWorkspace Workspace? @relation("ActiveWorkspace", fields: [activeWorkspaceId], references: [id])
+  activeWorkspaceId String?
+  memberships     WorkspaceMember[]
+  workspaces      Workspace[] @relation("WorkspaceOwner")
+  sentInvites     WorkspaceInvite[] @relation("WorkspaceInviteInvitedBy")
+  settings        UserSettings?
+  savedItems      SavedItem[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+// User preferences for invoice defaults
+model UserSettings {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Tax defaults
+  defaultTaxRate  Float?   @default(18)
+  taxInclusive    Boolean  @default(false)
+  
+  // Invoice defaults
+  defaultCurrency String   @default("INR")
+  paymentTerms    String?  @default("Net 30")
+  defaultNotes    String?
+  defaultTerms    String?
+  
+  // Branding
+  defaultTemplate String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Saved items library for quick-add
+model SavedItem {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  title       String
+  description String?
+  rate        Float    @default(0)
+  unit        String?  @default("nos")
+  taxRate     Float?
+  hsnCode     String?
+  category    String?  // "Services", "Products"
+  
+  // Usage tracking for recommendations
+  usageCount  Int      @default(0)
+  lastUsedAt  DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId, usageCount(sort: Desc)])
+}
+
+model Workspace {
+  id              String             @id @default(cuid())
+  name            String
+  slug            String             @unique
+  logo            String?
+  businessType    String?            @default("Freelancer")
+  taxGstNumber    String?
+  pan             String?
+  registeredEmail String?
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  state           String?
+  pin             String?
+  country         String?            @default("India")
+  owner           User               @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  ownerId         String
+  members         WorkspaceMember[]
+  activeUsers     User[]             @relation("ActiveWorkspace")
+  invites         WorkspaceInvite[]
+  reminders       ReminderHistory[]
+  clientDocuments ClientDocument[]
+  clients         Client[]
+  projects        Project[]
+  invoices        Invoice[]
+  reminderSettings ReminderSettings?
+  emailTemplates  EmailTemplate[]
+  invoiceSchedules InvoiceReminderSchedule[]
+  integrationConnections IntegrationConnection[]
+  agreements       Agreement[]
+  meetingNotes     MeetingNote[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  role        String    @default("owner")
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  workspaceId String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, workspaceId])
+}
+
+model WorkspaceInvite {
+  id           String    @id @default(cuid())
+  email        String
+  role         String    @default("viewer")
+  status       String    @default("pending")
+  token        String    @unique
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
+  workspaceId  String
+  invitedBy    User?     @relation("WorkspaceInviteInvitedBy", fields: [invitedById], references: [id])
+  invitedById  String?
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+}
+
+model VerificationToken {
+  id         String   @id @default(cuid())
+  identifier String
+  tokenHash  String   @unique
+  expires    DateTime
+  createdAt  DateTime @default(now())
+}
+
+model PasswordResetToken {
+  id         String   @id @default(cuid())
+  identifier String
+  tokenHash  String   @unique
+  expires    DateTime
+  createdAt  DateTime @default(now())
+}
+
+// --- Billing & CRM ---
+
+model Client {
+  id              String    @id @default(cuid())
+  workspace       Workspace @relation(fields: [workspaceId], references: [id])
+  workspaceId     String
+  name            String
+  contactPerson   String?
+  company         String?
+  email           String?
+  phone           String?
+  whatsapp        String?
+  businessType    String?   @default("Individual")
+  tags            String?
+  categoryTags    String?
+  preferredPaymentMethod String? @default("Bank Transfer")
+  paymentTerms    String?   @default("Net 15")
+  taxId           String?
+  lateFeeRules    String?
+  reminderChannel String?   @default("Email")
+  tonePreference  String?   @default("Warm")
+  escalationRule  String?
+  timezone        String?   @default("Asia/Kolkata")
+  currency        String?   @default("INR")
+  preferredCurrency String? @default("INR")
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  state           String?
+  country         String?   @default("India")
+  postalCode      String?
+  notes           String?
+  internalNotes   String?
+  agreements      Json?
+  reliabilityScore Int       @default(80)
+  averageDelayDays Int       @default(5)
+  outstanding      Decimal   @default(0)
+  riskBadge        String?   @default("Reliable")
+  paymentPrediction DateTime?
+  lastReminderAt    DateTime?
+  reminders        ReminderHistory[]
+  documents        ClientDocument[]
+  projects         Project[]
+  invoices         Invoice[]
+  clientAgreements Agreement[]
+  meetingNotes     MeetingNote[]
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+
+model Project {
+  id             String    @id @default(cuid())
+  workspace      Workspace @relation(fields: [workspaceId], references: [id])
+  workspaceId    String
+  client         Client?   @relation(fields: [clientId], references: [id])
+  clientId       String?
+  name           String
+  description    String?
+  status         ProjectStatus @default(ACTIVE)
+  
+  // -- New Fields from Request --
+  type           ProjectType   @default(FIXED)
+  billingStrategy BillingStrategy @default(SINGLE_INVOICE)
+  totalBudget    Int?          // in smallest currency unit (e.g. paise)
+  currency       String        @default("INR")
+  
+  // Automation flags
+  autoInvoiceEnabled  Boolean  @default(false)
+  autoRemindersEnabled Boolean @default(false)
+
+  // Legacy fields (kept for backward compatibility where they don't conflict)
+  rateType       RateType      @default(fixed)
+  rateValue      Decimal       @default(0)
+  defaultTax     Decimal       @default(0)
+  defaultCurrency String?      @default("INR")
+  startDate      DateTime?
+  endDate        DateTime?
+  attachments    Json?
+  riskBadge      String?   @default("Reliable")
+  nextInvoiceDate DateTime?
+  notes          String?
+  tags           String?
+  billingMode    String    @default("single")
+  paymentSchedule Json?
+  
+  // Relations
+  invoices       Invoice[]
+  reminders      ReminderHistory[]
+  documents      ClientDocument[]
+  
+  // New Relations
+  milestones     ProjectMilestone[]
+  aiDocuments    ProjectDocument[]
+
+  // Predefined billable items for this project
+  billableItems  Json?  // Array of {title, description, quantity, unitPrice, taxRate}
+  
+  // Notion document imports
+  projectAgreements Agreement[]
+  projectNotes      MeetingNote[]
+  
+  createdByUserId String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model ProjectMilestone {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title           String
+  description     String?
+  amount          Int        // smallest currency unit
+  currency        String     @default("INR")
+  expectedDate    DateTime?  // when work is expected to be done
+  dueDate         DateTime?  // when payment should be made
+
+  billingTrigger  MilestoneBillingTrigger @default(ON_COMPLETION)
+  status          MilestoneStatus         @default(PLANNED)
+  invoiceId       String?   // link to Invoice once generated
+  orderIndex      Int       @default(0)
+
+  autoInvoiceEnabled   Boolean @default(true)
+  autoRemindersEnabled Boolean @default(true)
+
+  // Smart automation: track manual actions to skip automation
+  lastManualActionAt   DateTime?  // when user last manually handled this milestone
+  manualActionType     String?    // "invoice_created", "payment_received", "marked_complete"
+  skipAutomation       Boolean    @default(false)  // explicitly skip automation for this milestone
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+
+model ProjectDocument {
+  id          String   @id @default(cuid())
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id])
+  clientId    String?
+  workspaceId String
+
+  fileKey     String   // path in storage (e.g., R2 / S3)
+  fileName    String
+  mimeType    String
+  size        Int
+
+  sourceType  ProjectDocumentSource @default(OTHER)
+  aiStatus    ProjectDocumentAIStatus @default(PENDING)
+  aiSummary   String?  // short natural language summary
+  aiExtract   Json?    // raw structured extract
+
+  createdByUserId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model InvoiceTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  category    String?
+  tags        String?
+  isPro       Boolean  @default(false)
+  accent      String?  // e.g. gradient token
+  thumbnail   String?
+  layout      Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  invoices    Invoice[]
+}
+
+model Invoice {
+  id           String         @id @default(cuid())
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id])
+  workspaceId  String
+  client       Client         @relation(fields: [clientId], references: [id])
+  clientId     String
+  project      Project?       @relation(fields: [projectId], references: [id])
+  projectId    String?
+  template     InvoiceTemplate? @relation(fields: [templateId], references: [id])
+  templateId   String?
+  number       String
+  status       InvoiceStatus  @default(draft)
+  issueDate    DateTime       @default(now())
+  dueDate      DateTime?
+  scheduledSendAt DateTime?
+  lastSentAt   DateTime?
+  deliveryChannel String?     @default("email")
+  sendMeta     Json?
+  currency     String         @default("INR")
+  subtotal     Decimal        @default(0)
+  taxTotal     Decimal        @default(0)
+  lateFee      Decimal        @default(0)
+  total        Decimal        @default(0)
+  notes        String?
+  terms        String?
+  reminderTone String?        @default("Warm + Polite")
+  
+  // Source tracking (for Slack/Notion imports)
+  source       String?        // "slack", "notion", "manual", "api"
+  sourceImportId String?      // ID of SlackImport or NotionImport
+  
+  items        InvoiceItem[]
+  reminders    ReminderHistory[]
+  remindersEnabled Boolean        @default(false)
+  reminderSchedule InvoiceReminderSchedule?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model InvoiceItem {
+  id          String   @id @default(cuid())
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+  invoiceId   String
+  title       String
+  description String?
+  quantity    Decimal  @default(1)
+  unitPrice   Decimal  @default(0)
+  taxRate     Decimal  @default(0)
+  total       Decimal  @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ReminderHistory {
+  id          String    @id @default(cuid())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  workspaceId String
+  client      Client?   @relation(fields: [clientId], references: [id])
+  clientId    String?
+  project     Project?  @relation(fields: [projectId], references: [id])
+  projectId   String?
+  invoice     Invoice?  @relation(fields: [invoiceId], references: [id])
+  invoiceId   String?
+  channel     ReminderChannel @default(email)
+  kind        String?   @default("reminder") // send | reminder | schedule
+  previewToUser Boolean? @default(false)
+  tone        String?   @default("Warm")
+  status      String?   @default("sent")
+  sentAt      DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+}
+
+model ClientDocument {
+  id          String    @id @default(cuid())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  workspaceId String
+  client      Client?   @relation(fields: [clientId], references: [id])
+  clientId    String?
+  project     Project?  @relation(fields: [projectId], references: [id])
+  projectId   String?
+  title       String
+  url         String
+  mimeType    String?
+  sizeBytes   Int?
+  gist        String?
+  createdAt   DateTime @default(now())
+}
+
+enum ProjectType {
+  RETAINER
+  FIXED
+  HOURLY
+  MILESTONE
+}
+
+enum ProjectStatus {
+  // New values
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+  
+  // Existing values (Preserved for compatibility)
+  active
+  paused
+  completed
+  archived
+}
+
+enum BillingStrategy {
+  PER_MILESTONE
+  SINGLE_INVOICE
+  RETAINER_MONTHLY
+  HOURLY_TIMESHEET
+}
+
+enum MilestoneStatus {
+  PLANNED
+  IN_PROGRESS
+  READY_FOR_INVOICE
+  INVOICED
+  PAID
+  CANCELLED
+}
+
+enum MilestoneBillingTrigger {
+  ON_CREATION       
+  ON_COMPLETION     
+  ON_APPROVAL       
+  ON_FIXED_DATE     
+}
+
+enum ProjectDocumentSource {
+  CONTRACT
+  PROPOSAL
+  SOW
+  EMAIL_EXPORT
+  CHAT_EXPORT
+  NOTE
+  OTHER
+}
+
+enum ProjectDocumentAIStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+// Keep existing enums
+enum ReminderChannel {
+  email
+  whatsapp
+  both
+}
+
+enum RateType {
+  fixed
+  hourly
+  milestone
+}
+
+enum InvoiceStatus {
+  draft
+  sent
+  scheduled
+  paid
+  overdue
+  cancelled
+}
+
+// Previous models continue...
+
+model ReminderSettings {
+  id           String   @id @default(cuid())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
+  workspaceId  String   @unique
+  enabled      Boolean  @default(true)
+  timezone     String   @default("Asia/Kolkata")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model InvoiceReminderSchedule {
+  id             String                  @id @default(cuid())
+  invoice        Invoice                 @relation(fields: [invoiceId], references: [id])
+  invoiceId      String                  @unique
+  workspace      Workspace               @relation(fields: [workspaceId], references: [id])
+  workspaceId    String
+  enabled        Boolean                 @default(true)
+  useDefaults    Boolean                 @default(true)
+  presetName     String?                 
+  createdByUserId String?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  steps          InvoiceReminderStep[]
+}
+
+model InvoiceReminderStep {
+  id              String   @id @default(cuid())
+  schedule        InvoiceReminderSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  scheduleId      String
+  index           Int
+  daysBeforeDue   Int?     
+  daysAfterDue    Int?     
+  offsetFromDueInMinutes Int 
+  sendAt          DateTime 
+  emailTemplate   EmailTemplate? @relation(fields: [emailTemplateId], references: [id])
+  emailTemplateId String?   
+  notifyCreator   Boolean @default(true)
+  status          String   @default("PENDING") // PENDING | SENT | SKIPPED | CANCELLED | FAILED
+  lastError       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  workspaceId String
+  slug        String   
+  name        String
+  description String?
+  subject     String
+  body        String   
+  theme       String   @default("modern")  // minimal | classic | modern | noir
+  brandColor  String   @default("#0f172a")
+  logoUrl     String?
+  usedFor     String?   
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  reminderSteps InvoiceReminderStep[]
+
+  @@unique([workspaceId, slug])
+}
+
+// --- Integrations (Slack, Notion) ---
+
+model IntegrationConnection {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  provider        IntegrationProvider
+  status          ConnectionStatus @default(CONNECTED)
+  
+  // OAuth tokens (encrypted at application layer)
+  accessToken     String?
+  refreshToken    String?
+  tokenExpiresAt  DateTime?
+  
+  // Provider-specific metadata
+  providerWorkspaceId   String?  // Slack workspace ID or Notion workspace ID
+  providerWorkspaceName String?
+  scopes          String?      // Comma-separated OAuth scopes
+  
+  // Configuration (JSON for provider-specific settings)
+  config          Json?
+  
+  // Error tracking
+  lastError       String?
+  lastErrorAt     DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  slackImports    SlackImport[]
+  notionImports   NotionImport[]
+  
+  @@unique([workspaceId, provider])
+  @@index([workspaceId, status])
+}
+
+model NotionImport {
+  id                String   @id @default(cuid())
+  connectionId      String
+  connection        IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  
+  notionDatabaseId  String
+  notionPageId      String?
+  notionPageTitle   String?
+  
+  // Import metadata
+  importType        NotionImportType
+  status            ImportStatus @default(PENDING)
+  
+  // AI extraction results
+  aiSummary         String?
+  extractedData     Json?  // Structured data extracted by AI
+  
+  // Linked entities (optional - depends on import type)
+  projectId         String?
+  clientId          String?
+  
+  // Sync tracking
+  lastSyncedAt      DateTime?
+  syncEnabled       Boolean @default(false)
+  
+  // Error handling
+  errorMessage      String?
+  retryCount        Int @default(0)
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@index([connectionId, status])
+  @@index([notionDatabaseId])
+}
+
+model SlackImport {
+  id              String   @id @default(cuid())
+  connectionId    String
+  connection      IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  
+  channelId       String
+  channelName     String?
+  threadTs        String?   // Thread timestamp (Slack's unique thread identifier)
+  messageTs       String?   // Message timestamp
+  
+  // Import metadata
+  importType      SlackImportType
+  status          ImportStatus @default(PENDING)
+  
+  // Raw content (stored as JSON array of Slack messages)
+  rawMessages     Json?
+  
+  // AI extraction results
+  aiSummary       String?
+  extractedData   Json?  // Structured invoice/project data
+  confidenceScore Int?   // 0-100
+  
+  // Linked entities (optional)
+  invoiceId       String?
+  projectId       String?
+  clientId        String?
+  
+  // Error handling
+  errorMessage    String?
+  retryCount      Int @default(0)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([connectionId, status])
+  @@index([channelId, threadTs])
+}
+
+// --- Agreement Model (for SOW, Contracts from Notion) ---
+
+model Agreement {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id])
+  clientId        String?
+  client          Client?   @relation(fields: [clientId], references: [id])
+  projectId       String?
+  project         Project?  @relation(fields: [projectId], references: [id])
+  
+  title           String
+  notionPageId    String?   @unique
+  rawBlocks       Json?     // Notion block content
+  summary         String?   // AI-generated (Premium)
+  milestones      Json?     // Parsed milestones (Premium)
+  amount          Decimal?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([workspaceId, clientId])
+}
+
+// --- Meeting Note Model (for client meeting notes from Notion) ---
+
+model MeetingNote {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id])
+  clientId        String?
+  client          Client?   @relation(fields: [clientId], references: [id])
+  projectId       String?
+  project         Project?  @relation(fields: [projectId], references: [id])
+  
+  title           String
+  notionPageId    String?   @unique
+  date            DateTime?
+  rawBlocks       Json?     // Notion block content
+  billableSummary String?   // AI-generated billable suggestion (Premium)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([workspaceId, clientId])
+}
+
+// --- Integration Enums ---
+
+enum IntegrationProvider {
+  SLACK
+  NOTION
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+enum NotionImportType {
+  PROJECT
+  CLIENT
+  TASK
+  INVOICE_DATA
+  AGREEMENT
+  MEETING_NOTE
+}
+
+enum SlackImportType {
+  THREAD_SUMMARY
+  SLASH_COMMAND
+  MESSAGE_REACTION
+  MESSAGE_SHORTCUT
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+

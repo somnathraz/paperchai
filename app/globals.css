@@ -1,0 +1,257 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 33% 98%;
+    --foreground: 224 71% 5%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 71% 5%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71% 5%;
+    --primary: 162 73% 39%;
+    --primary-foreground: 156 100% 96%;
+    --secondary: 226 60% 93%;
+    --secondary-foreground: 224 71% 12%;
+    --muted: 220 16% 92%;
+    --muted-foreground: 222 14% 36%;
+    --accent: 263 85% 96%;
+    --accent-foreground: 226 47% 14%;
+    --destructive: 0 70% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 220 15% 90%;
+    --input: 220 15% 90%;
+    --ring: 162 73% 39%;
+    --chart-1: 162 73% 39%;
+    --chart-2: 202 71% 45%;
+    --chart-3: 46 97% 63%;
+    --chart-4: 263 77% 65%;
+    --chart-5: 343 76% 62%;
+    --radius: 0.9rem;
+  }
+
+  .dark {
+    --background: 222 60% 6%;
+    --foreground: 210 40% 96%;
+    --card: 222 44% 10%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 44% 10%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 162 73% 52%;
+    --primary-foreground: 222 84% 6%;
+    --secondary: 222 37% 16%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 222 29% 18%;
+    --muted-foreground: 216 15% 72%;
+    --accent: 263 52% 28%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 218 32% 22%;
+    --input: 218 32% 22%;
+    --ring: 162 73% 52%;
+    --chart-1: 162 73% 52%;
+    --chart-2: 202 71% 48%;
+    --chart-3: 46 97% 63%;
+    --chart-4: 263 77% 65%;
+    --chart-5: 343 76% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at 20% 20%, hsl(161 72% 80% / 0.22), transparent 34%),
+      radial-gradient(circle at 80% 0%, hsl(263 76% 85% / 0.18), transparent 28%),
+      radial-gradient(circle at 10% 75%, hsl(199 84% 80% / 0.14), transparent 30%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+    color: hsl(var(--foreground));
+  }
+}
+
+@layer utilities {
+  .shell {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-10;
+  }
+
+  .glass-panel {
+    @apply border border-white/10 bg-white/70 text-foreground shadow-xl shadow-primary/10 backdrop-blur-2xl dark:border-white/5 dark:bg-white/5;
+  }
+
+  .grid-surface {
+    background-image:
+      linear-gradient(to right, hsl(var(--border)) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border)) 1px, transparent 1px);
+    background-size: 42px 42px;
+  }
+
+  .sheen {
+    background-size: 200% 200%;
+    animation: gradientShift 18s ease-in-out infinite;
+  }
+
+  .bar-animate {
+    background-size: 200% 100%;
+    animation: gradientShift 10s ease-in-out infinite;
+  }
+
+  .float-slow {
+    animation: float 10s ease-in-out infinite;
+  }
+
+  .pulse-soft {
+    animation: pulseGlow 14s ease-in-out infinite;
+  }
+
+  .grid-hero {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.65) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.65) 1px, transparent 1px);
+    background-size: 120px 120px;
+    background-position: center;
+  }
+
+  .watermark {
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    opacity: 0.06;
+  }
+
+  .bg-gradient-radial {
+    background-image: radial-gradient(circle, var(--tw-gradient-stops));
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes float {
+  0% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-8px);
+  }
+
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+@keyframes pulseGlow {
+  0% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 0.8;
+    filter: blur(40px);
+  }
+
+  100% {
+    opacity: 0.35;
+  }
+}
+
+/* Print Styles for Invoice Templates */
+@media print {
+
+  /* Remove all shadows and rounded corners for print */
+  * {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+
+  /* Force white background */
+  body {
+    background: white !important;
+  }
+
+  /* Ensure invoice templates print correctly */
+  .invoice-page,
+  [class*="invoice"],
+  [class*="template"] {
+    background: white !important;
+    box-shadow: none !important;
+    border: none !important;
+    page-break-inside: avoid;
+  }
+
+  /* Prevent gradients from bleeding */
+  [class*="gradient"] {
+    background: white !important;
+  }
+
+  /* Ensure proper page breaks */
+  table {
+    page-break-inside: avoid;
+  }
+
+  tr {
+    page-break-inside: avoid;
+  }
+
+  /* Hide non-essential elements */
+  button,
+  [role="button"],
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* PDF View Container Styles */
+.pdf-view-container {
+  background: white;
+  margin: 0;
+  padding: 0;
+}
+
+@page {
+  size: A4;
+  margin: 0;
+}
+
+@media print {
+  .pdf-view-container {
+    background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+}

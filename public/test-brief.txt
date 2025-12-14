@@ -1,0 +1,11 @@
+Client: Acme Corp
+Email: contact@acme.com
+Project: Website Redesign 2024
+Budget: $5000
+Start Date: 2025-01-01
+End Date: 2025-03-01
+
+Milestones:
+1. Design Phase - $2000 - Due 2025-01-15
+2. Development Phase - $2000 - Due 2025-02-15
+3. Launch - $1000 - Due 2025-03-01

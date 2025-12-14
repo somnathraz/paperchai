@@ -1,0 +1,327 @@
+{
+  "templates": [
+    {
+      "slug": "classic-gray",
+      "name": "Classic Gray",
+      "type": "Free",
+      "tags": ["free", "corporate", "gray"],
+      "fields": [
+        "businessName",
+        "logo",
+        "invoiceNumber",
+        "issueDate",
+        "dueDate",
+        "clientName",
+        "clientAddress",
+        "lineItems",
+        "subtotal",
+        "tax",
+        "total",
+        "notes",
+        "paymentTerms"
+      ],
+      "uniqueFields": ["logo", "grayScaleIntensity"],
+      "sections": 5,
+      "bestFor": "Corporate clients, professional services, B2B invoices"
+    },
+    {
+      "slug": "minimal-light",
+      "name": "Minimal Light",
+      "type": "Free",
+      "tags": ["free", "light", "clean"],
+      "fields": [
+        "businessName",
+        "invoiceNumber",
+        "clientName",
+        "lineItems",
+        "total",
+        "websiteUrl",
+        "contactEmail"
+      ],
+      "uniqueFields": ["websiteUrl", "contactEmail", "typographySwitch", "footerToggle"],
+      "sections": 5,
+      "bestFor": "Freelancers, minimalist brands, creative agencies"
+    },
+    {
+      "slug": "duo-card",
+      "name": "Duo Card",
+      "type": "Free",
+      "tags": ["free", "split", "qr"],
+      "fields": [
+        "businessName",
+        "businessTagline",
+        "invoiceNumber",
+        "clientName",
+        "lineItems",
+        "subtotal",
+        "total",
+        "paymentTerms"
+      ],
+      "uniqueFields": ["businessTagline", "cardColorPicker", "iconSetToggle", "highlightColor"],
+      "sections": 5,
+      "bestFor": "Creative studios, design agencies, modern businesses"
+    },
+    {
+      "slug": "invoice-compact",
+      "name": "Invoice Compact",
+      "type": "Free",
+      "tags": ["free", "compact", "mobile"],
+      "fields": [
+        "businessName",
+        "invoiceNumber",
+        "issueDate",
+        "clientName",
+        "lineItems",
+        "subtotal",
+        "tax",
+        "total",
+        "poNumber"
+      ],
+      "uniqueFields": ["poNumber", "currencySymbolPositioning"],
+      "sections": 5,
+      "bestFor": "Quick invoices, mobile-friendly, space-efficient"
+    },
+    {
+      "slug": "soft-pastel",
+      "name": "Soft Pastel",
+      "type": "Free",
+      "tags": ["free", "pastel", "rounded"],
+      "fields": [
+        "businessName",
+        "invoiceNumber",
+        "clientName",
+        "lineItems",
+        "total",
+        "qrCode"
+      ],
+      "uniqueFields": ["qrCodePosition", "bannerColor", "pastelThemeSelector"],
+      "sections": 5,
+      "bestFor": "Freelancers, small businesses, friendly brands"
+    },
+    {
+      "slug": "neat-receipt",
+      "name": "Neat Receipt",
+      "type": "Free",
+      "tags": ["free", "receipt", "mono"],
+      "fields": [
+        "businessName",
+        "logo",
+        "receiptNumber",
+        "date",
+        "lineItems",
+        "total",
+        "barcode"
+      ],
+      "uniqueFields": ["barcodeGenerator", "storeStyleRounding", "receiptStyleFormatting"],
+      "sections": 5,
+      "bestFor": "Retail stores, cafes, point-of-sale businesses"
+    },
+    {
+      "slug": "studio-bold",
+      "name": "Studio Bold",
+      "type": "Free",
+      "tags": ["free", "bold", "light"],
+      "fields": [
+        "businessName",
+        "invoiceNumber",
+        "issueDate",
+        "clientName",
+        "lineItems",
+        "total",
+        "footerMessage"
+      ],
+      "uniqueFields": ["accentColorControl", "watermark", "footerMessage"],
+      "sections": 5,
+      "bestFor": "Creative studios, agencies, bold brands"
+    },
+    {
+      "slug": "edge-minimal-pro",
+      "name": "Edge Minimal Pro",
+      "type": "Pro",
+      "tags": ["pro", "minimal", "geometric"],
+      "fields": [
+        "businessName",
+        "invoiceNumber",
+        "issueDate",
+        "clientName",
+        "lineItems",
+        "subtotal",
+        "tax",
+        "total",
+        "sidebarStats",
+        "lateFeeCalculator"
+      ],
+      "uniqueFields": ["sidebarStats", "lateFeeCalculator", "alternatingRowColors"],
+      "sections": 5,
+      "bestFor": "Enterprise clients, financial services, premium brands"
+    },
+    {
+      "slug": "essential-pro",
+      "name": "Essential Pro",
+      "type": "Pro",
+      "tags": ["pro", "corporate", "tax"],
+      "fields": [
+        "businessName",
+        "invoiceNumber",
+        "issueDate",
+        "clientName",
+        "clientContactCard",
+        "lineItemsWithTags",
+        "subtotal",
+        "tax",
+        "total",
+        "paymentTerms"
+      ],
+      "uniqueFields": ["lineItemTags", "clientContactCard", "rightAlignedTotals"],
+      "sections": 5,
+      "bestFor": "SaaS companies, tech startups, modern businesses"
+    },
+    {
+      "slug": "folio-modern",
+      "name": "Folio Modern",
+      "type": "Pro",
+      "tags": ["pro", "magazine", "hero"],
+      "fields": [
+        "businessName",
+        "invoiceNumber",
+        "heroTitle",
+        "clientName",
+        "lineItems",
+        "total"
+      ],
+      "uniqueFields": ["heroTitle", "backgroundTexture", "editorialStyling", "largeTypography"],
+      "sections": 5,
+      "bestFor": "Fashion brands, luxury goods, editorial businesses"
+    },
+    {
+      "slug": "gradient-aura",
+      "name": "Gradient Aura",
+      "type": "Pro",
+      "tags": ["pro", "gradient", "light"],
+      "fields": [
+        "businessName",
+        "invoiceNumber",
+        "issueDate",
+        "clientName",
+        "lineItems",
+        "subtotal",
+        "tax",
+        "total"
+      ],
+      "uniqueFields": ["gradientPicker", "shadowToggle", "glassmorphismEffects", "floatingElements"],
+      "sections": 4,
+      "bestFor": "Creative agencies, modern brands, tech companies"
+    },
+    {
+      "slug": "luxe-gold",
+      "name": "Luxe Gold",
+      "type": "Pro",
+      "tags": ["pro", "gold", "premium"],
+      "fields": [
+        "businessName",
+        "invoiceNumber",
+        "issueDate",
+        "clientName",
+        "lineItems",
+        "total",
+        "signature"
+      ],
+      "uniqueFields": ["goldIntensitySlider", "signatureBlock", "richFooterMessage", "headerBarStyle"],
+      "sections": 5,
+      "bestFor": "Luxury brands, high-end services, premium products"
+    },
+    {
+      "slug": "multi-brand-dynamic",
+      "name": "Multi-Brand Dynamic",
+      "type": "Pro",
+      "tags": ["pro", "dynamic", "brand"],
+      "fields": [
+        "businessName",
+        "multipleBrandLogos",
+        "brandSwitcher",
+        "invoiceNumber",
+        "clientName",
+        "lineItems",
+        "subtotal",
+        "tax",
+        "total"
+      ],
+      "uniqueFields": ["brandSwitcher", "multiIdentitySelection", "multipleBrandLogos", "brandColorThemes"],
+      "sections": 5,
+      "bestFor": "Agencies with multiple brands, franchises, multi-brand businesses"
+    },
+    {
+      "slug": "neo-dark",
+      "name": "Neo Dark",
+      "type": "Pro",
+      "tags": ["pro", "dark", "fintech"],
+      "fields": [
+        "businessName",
+        "invoiceNumber",
+        "issueDate",
+        "clientName",
+        "lineItems",
+        "subtotal",
+        "tax",
+        "total"
+      ],
+      "uniqueFields": ["neonAccentToggle", "tableHoverAnimation", "darkModeOptimized", "stickyTotals"],
+      "sections": 5,
+      "bestFor": "Fintech companies, tech startups, modern SaaS"
+    },
+    {
+      "slug": "split-hero",
+      "name": "Split Hero",
+      "type": "Pro",
+      "tags": ["pro", "hero", "visual"],
+      "fields": [
+        "businessName",
+        "logo",
+        "heroImage",
+        "invoiceNumber",
+        "issueDate",
+        "clientName",
+        "lineItems",
+        "total"
+      ],
+      "uniqueFields": [
+        "heroImage",
+        "imageFilters",
+        "layoutSplitRatio",
+        "imageOpacity"
+      ],
+      "sections": 2,
+      "bestFor": "Creative agencies, photographers, visual brands"
+    }
+  ],
+  "commonFields": [
+    "businessName",
+    "invoiceNumber",
+    "issueDate",
+    "clientName",
+    "lineItems",
+    "total"
+  ],
+  "optionalFields": [
+    "logo",
+    "clientAddress",
+    "dueDate",
+    "subtotal",
+    "tax",
+    "notes",
+    "paymentTerms",
+    "poNumber",
+    "websiteUrl",
+    "contactEmail",
+    "qrCode",
+    "barcode",
+    "signature",
+    "watermark"
+  ],
+  "summary": {
+    "total": 15,
+    "free": 7,
+    "pro": 8
+  }
+}
+
