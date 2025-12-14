@@ -5,13 +5,11 @@ import { Providers } from "@/components/providers";
 import { Toaster } from "sonner";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { defaultMetadata } from "@/lib/seo-config";
 
 const grotesk = Space_Grotesk({ subsets: ["latin"], display: "swap" });
 
-export const metadata: Metadata = {
-  title: "Freelance Money Command Center",
-  description: "A landing experience for the Freelance Money Command Center.",
-};
+export const metadata: Metadata = defaultMetadata;
 
 export default function RootLayout({
   children,
