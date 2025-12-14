@@ -3,6 +3,7 @@
 import { TemplateProps } from "./types";
 import { getOrderedSections } from "./section-renderer";
 import { getFontFamily } from "../font-loader";
+import Image from "next/image";
 
 /**
  * Classic Gray - Corporate, neutral gray tones
@@ -186,17 +187,20 @@ export function ClassicGray({ preview = false, modalPreview = false, mockData, s
             )}
             {data.signatureUrl && (
               <div className="flex justify-center pt-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={data.signatureUrl}
-                  alt="Signature"
-                  className="object-contain"
-                  style={{
-                    height: data.signatureSettings?.height ? `${data.signatureSettings.height}px` : "48px",
-                    width: "auto",
-                    borderRadius: data.signatureSettings?.style === "square" ? "0px" : data.signatureSettings?.style === "rounded" ? "4px" : "0px"
-                  }}
-                />
+                <div className="relative" style={{
+                  height: data.signatureSettings?.height ? `${data.signatureSettings.height}px` : "48px",
+                  width: "128px", // Provide a default width for the container
+                }}>
+                  <Image
+                    src={data.signatureUrl}
+                    alt="Signature"
+                    fill // Use fill to make image take up parent div's size
+                    className="object-contain"
+                    style={{
+                      borderRadius: data.signatureSettings?.style === "square" ? "0px" : data.signatureSettings?.style === "rounded" ? "4px" : "0px"
+                    }}
+                  />
+                </div>
               </div>
             )}
           </div>

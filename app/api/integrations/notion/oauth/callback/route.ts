@@ -106,9 +106,13 @@ export async function GET(request: NextRequest) {
             },
         });
 
-        // 8. Success - redirect to integrations page
+        // 8. Success - redirect to integrations page or custom URL
+        const redirectUrl = stateData.redirectTo
+            ? `${stateData.redirectTo}?success=notion_connected`
+            : "/settings/integrations?success=notion_connected";
+
         return NextResponse.redirect(
-            new URL("/settings/integrations?success=notion_connected", request.url)
+            new URL(redirectUrl, request.url)
         );
 
     } catch (error) {

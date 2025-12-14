@@ -2,6 +2,7 @@
 
 import { ReactNode, useMemo, useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { useSession } from "next-auth/react";
 import { User, Briefcase, Mail, Clock3, Globe, MessageCircle, RotateCcw, CheckCircle2, XCircle } from "lucide-react";
 
@@ -183,10 +184,9 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
             <div className="flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 via-primary/60 to-emerald-400/60 text-lg sm:text-xl font-semibold text-white shadow-inner shadow-primary/30 shrink-0">
               {avatarPreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={avatarPreview} alt="Avatar preview" className="h-full w-full rounded-full object-cover" />
+                <Image src={avatarPreview} alt="Avatar preview" width={128} height={128} className="h-full w-full rounded-full object-cover" />
               ) : (
-                getWorkspaceInitials(workspaceName)
+                <div className="flex h-full w-full items-center justify-center rounded-full bg-muted text-2xl font-semibold text-muted-foreground">{getWorkspaceInitials(workspaceName)}</div>
               )}
             </div>
             <div className="space-y-2 text-xs sm:text-sm text-muted-foreground">
@@ -312,8 +312,8 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
           </div>
           <div className="rounded-xl border border-white/30 bg-gradient-to-br from-primary/5 via-white to-emerald-50 px-3 py-2.5 sm:px-4 sm:py-3 text-xs sm:text-sm text-foreground shadow-inner">
             <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">WhatsApp</p>
-            "Hey Ankit — hope you're doing well! Dropping a {form.reminderTone.toLowerCase()} reminder for invoice #108
-            ({form.currency})."
+            &quot;Hey Ankit — hope you&apos;re doing well! Dropping a {form.reminderTone.toLowerCase()} reminder for invoice #108
+            ({form.currency}).&quot;
           </div>
         </div>
       </section>

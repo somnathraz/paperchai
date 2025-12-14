@@ -1,5 +1,5 @@
-"use client";
-
+import { useState, useCallback } from "react";
+import Image from "next/image";
 import { InvoiceFormState } from "../../invoice-form";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -318,8 +318,9 @@ export function BrandingTab({ formState, onFormStateChange, updateField }: Brand
                         />
                         {formState.logoUrl && (
                             <div className="mt-2 h-12 w-12 rounded border">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={formState.logoUrl} alt="Logo" className="h-full w-full object-contain rounded" />
+                                {formState.logoUrl && (
+                                    <Image src={formState.logoUrl} alt="Logo" width={48} height={48} className="h-full w-full object-contain rounded" />
+                                )}
                             </div>
                         )}
                         <div className="flex items-center gap-2 mt-2">
@@ -360,8 +361,7 @@ export function BrandingTab({ formState, onFormStateChange, updateField }: Brand
                         />
                         {formState.signatureUrl && (
                             <div className="mt-2 h-16 w-32 rounded border">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={formState.signatureUrl} alt="Signature" className="h-full w-full object-contain rounded" />
+                                <Image src={formState.signatureUrl} alt="Signature" width={128} height={64} className="h-full w-full object-contain rounded" />
                             </div>
                         )}
                     </div>

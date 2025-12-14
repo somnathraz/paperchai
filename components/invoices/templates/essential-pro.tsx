@@ -2,6 +2,7 @@
 
 import { TemplateProps } from "./types";
 import { getOrderedSections } from "./section-renderer";
+import Image from "next/image";
 
 /**
  * Essential Pro - Clean SaaS style (Stripe-like)
@@ -134,10 +135,21 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
                 Reminders: Soft {data.reminderCadence.softDays ?? "-"}d · Medium {data.reminderCadence.mediumDays ?? "-"}d · Firm {data.reminderCadence.firmDays ?? "-"}d
               </p>
             )}
+            {/* Signature */}
             {data.signatureUrl && (
-              <div className="mt-3 flex justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={data.signatureUrl} alt="Signature" className="h-12 object-contain" />
+              <div className="mt-12 flex justify-end">
+                <div className="text-right">
+                  <div className="mb-2 h-16 w-32 relative">
+                    <Image
+                      src={data.signatureUrl || ""}
+                      alt="Signature"
+                      width={128}
+                      height={64}
+                      className="h-full w-full object-contain object-right"
+                    />
+                  </div>
+                  <p className="text-sm font-medium text-gray-900">{data.businessName}</p>
+                </div>
               </div>
             )}
           </div>
@@ -164,7 +176,7 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
   const mainSections = orderedSections.filter((s) => mainSlotIds.includes(s.id));
   const leftSections = orderedSections.filter((s) => leftSlotIds.includes(s.id));
   const rightSections = orderedSections.filter((s) => rightSlotIds.includes(s.id));
-  
+
   // Custom sections: place them after the last section of their type
   // For Essential Pro, custom sections go to left column (after notes)
   const customSections = orderedSections.filter((s) => s.custom && s.visible);

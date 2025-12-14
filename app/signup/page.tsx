@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { signIn } from "next-auth/react";
+import { useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { Mail, Lock, UserPlus, AlertCircle } from "lucide-react";
+import { useAuth, useAuthRedirect } from "@/features/auth/hooks";
+import { validateEmail, validatePassword, validatePasswordMatch } from "@/features/auth/utils";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { AuthHeader } from "@/components/auth/AuthHeader";
@@ -22,70 +23,65 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  // Use Redux auth state and actions
+  const { signup, loginWithGoogle, isLoading, error, status, clearError, clearStatus } = useAuth();
 
-  const handleGoogle = async () => {
-    setError(null);
-    setStatus(null);
-    setLoading(true);
-    try {
-      await signIn("google", { callbackUrl: "/dashboard" });
-    } catch {
-      setError("Google sign-in failed. Please try again.");
-      setLoading(false);
-    }
-  };
+  // Auto-redirect if already authenticated
+  useAuthRedirect();
 
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setStatus(null);
-    if (!emailRegex.test(email.trim())) {
-      setError("Enter a valid email.");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-    if (password !== confirm) {
-      setError("Passwords must match.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await fetch("/api/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const message =
-          res.status === 409
-            ? "An account with this email already exists."
-            : data.error || "Could not create account. Try again.";
-        setError(message);
+  // Memoized validations
+  const emailValidation = useMemo(() => validateEmail(email), [email]);
+  const passwordValidation = useMemo(() => validatePassword(password), [password]);
+  const passwordMatchValidation = useMemo(() => validatePasswordMatch(password, confirm), [password, confirm]);
+
+  const canSubmit = useMemo(
+    () => emailValidation && passwordValidation.valid && passwordMatchValidation.valid,
+    [emailValidation, passwordValidation, passwordMatchValidation]
+  );
+
+  // useCallback for stable references
+  const handleGoogle = useCallback(async () => {
+    clearError();
+    clearStatus();
+    await loginWithGoogle();
+  }, [loginWithGoogle, clearError, clearStatus]);
+
+  const handleSignup = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      clearError();
+      clearStatus();
+      setLocalError(null);
+
+      // Validation
+      if (!emailValidation) {
+        setLocalError("Enter a valid email.");
         return;
       }
-      const data = await res.json();
-      setStatus("Account created. Check your email for a verification link.");
-      if (data?.verifyUrl) {
-        setStatus(`Account created. Verify via link: ${data.verifyUrl}`);
+      if (!passwordValidation.valid) {
+        setLocalError(passwordValidation.error || "Invalid password");
+        return;
       }
-      setEmail("");
-      setPassword("");
-      setConfirm("");
-    } catch {
-      setError("Could not create account. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (!passwordMatchValidation.valid) {
+        setLocalError(passwordMatchValidation.error || "Passwords do not match");
+        return;
+      }
+
+      const result = await signup(email, password);
+
+      // Clear form on success
+      if (!result.type.includes("rejected")) {
+        setEmail("");
+        setPassword("");
+        setConfirm("");
+      }
+    },
+    [email, password, confirm, emailValidation, passwordValidation, passwordMatchValidation, signup, clearError, clearStatus]
+  );
+
+  const displayError = localError || error;
 
   return (
     <AuthLayout
@@ -98,7 +94,7 @@ export default function SignupPage() {
         <AuthHeader title="PaperChai onboarding" subtitle="Create your workspace" />
 
         <div className="space-y-4">
-          <GoogleButton label="Sign up with Google" onClick={handleGoogle} disabled={loading} />
+          <GoogleButton label="Sign up with Google" onClick={handleGoogle} disabled={isLoading} />
 
           <DividerLine />
 
@@ -110,7 +106,7 @@ export default function SignupPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@paperchai.com"
-              disabled={loading}
+              disabled={isLoading}
               autoComplete="email"
             />
             <InputField
@@ -120,7 +116,7 @@ export default function SignupPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              disabled={loading}
+              disabled={isLoading}
               autoComplete="new-password"
             />
             <InputField
@@ -130,14 +126,14 @@ export default function SignupPage() {
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               placeholder="••••••••"
-              disabled={loading}
+              disabled={isLoading}
               autoComplete="new-password"
             />
 
-            {error && (
+            {displayError && (
               <div className="flex items-center gap-2 rounded-2xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 <AlertCircle className="h-4 w-4" />
-                {error}
+                {displayError}
               </div>
             )}
             {status && (
@@ -146,8 +142,8 @@ export default function SignupPage() {
               </div>
             )}
 
-            <PrimaryButton type="submit" icon={<UserPlus className="h-4 w-4" />} disabled={loading}>
-              {loading ? "Creating..." : "Create account"}
+            <PrimaryButton type="submit" icon={<UserPlus className="h-4 w-4" />} disabled={isLoading || !canSubmit}>
+              {isLoading ? "Creating..." : "Create account"}
             </PrimaryButton>
           </form>
 

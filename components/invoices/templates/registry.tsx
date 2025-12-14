@@ -3,6 +3,7 @@
  */
 
 import React from "react";
+import Image from "next/image";
 import { TemplateSlug, TemplateProps } from "./types";
 import { ClassicGray } from "./classic-gray";
 import { MinimalLight } from "./minimal-light";
@@ -203,12 +204,15 @@ export function renderTemplate(slug: string, props: TemplateProps = {}) {
                 {hasSignature ? (
                   <div className="flex items-center justify-start gap-3">
                     {props.mockData?.signatureUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={props.mockData.signatureUrl}
-                        alt="Signature"
-                        className="h-12 object-contain"
-                      />
+                      <div className="h-12 w-32 relative">
+                        <Image
+                          src={props.mockData.signatureUrl}
+                          alt="Signature"
+                          width={128}
+                          height={48}
+                          className="h-full w-full object-contain object-left"
+                        />
+                      </div>
                     ) : null}
                     {section.content && <p className="text-sm text-slate-900 whitespace-pre-line">{section.content}</p>}
                   </div>
@@ -282,8 +286,14 @@ function TemplateSlotRenderer({
           <div className={`flex items-start justify-between border-b border-slate-200 ${s.px} ${s.header}`}>
             <div>
               {data.logoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={data.logoUrl} alt="Logo" className={`${s.gap} h-10 w-10 rounded object-contain`} />
+                <div className={`${s.gap} h-10 w-10 relative`}>
+                  <Image
+                    src={data.logoUrl}
+                    alt="Logo"
+                    fill
+                    className="rounded object-contain"
+                  />
+                </div>
               ) : (
                 <div className={`${s.gap} h-10 w-10 rounded bg-slate-300`} />
               )}
@@ -354,8 +364,14 @@ function TemplateSlotRenderer({
             )}
             {data.signatureUrl && (
               <div className="mt-2 flex justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={data.signatureUrl} alt="Signature" className="h-12 object-contain" />
+                <div className="h-12 w-32 relative">
+                  <Image
+                    src={data.signatureUrl}
+                    alt="Signature"
+                    fill
+                    className="object-contain"
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -375,8 +391,14 @@ function TemplateSlotRenderer({
             {hasSignature ? (
               <div className="flex items-center gap-3">
                 {data.signatureUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={data.signatureUrl} alt="Signature" className="h-12 object-contain" />
+                  <div className="h-12 w-32 relative">
+                    <Image
+                      src={data.signatureUrl}
+                      alt="Signature"
+                      fill
+                      className="object-contain"
+                    />
+                  </div>
                 ) : null}
                 {section.content && <p className={`${s.text} text-slate-900 whitespace-pre-line`}>{section.content}</p>}
               </div>

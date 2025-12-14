@@ -1,16 +1,16 @@
+
 import { DashboardLayout } from "@/components/dashboard/layout-shell";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { AutomationPipeline } from "@/components/dashboard/automation/pipeline";
-import { AutomationRules } from "@/components/dashboard/automation/rules";
-import { ClientInsights } from "@/components/dashboard/automation/client-insights";
-import { ActivityFeed } from "@/components/dashboard/automation/activity-feed";
-import { SettingsSummary } from "@/components/dashboard/automation/settings-summary";
-import { RevenueImpact } from "@/components/dashboard/automation/revenue-impact";
-import { IntegrationProvider } from "@/lib/hooks/use-integration";
-import { IntegrationRecommendations } from "@/components/automation/integration-recommendations";
-import { RunningAutomations } from "@/components/integrations/running-automations";
+import { AutomationPipeline } from "@/features/automation/components/pipeline";
+import { AutomationRules } from "@/features/automation/components/rules";
+import { ClientInsights } from "@/features/automation/components/client-insights";
+import { ActivityFeed } from "@/features/automation/components/activity-feed";
+import { SettingsSummary } from "@/features/automation/components/settings-summary";
+import { RevenueImpact } from "@/features/automation/components/revenue-impact";
+import { IntegrationRecommendations } from "@/features/automation/components/IntegrationRecommendations";
+import { RunningAutomations } from "@/features/automation/components/RunningAutomations";
 
 export default async function AutomationPage() {
     const session = await getServerSession(authOptions);
@@ -31,11 +31,9 @@ export default async function AutomationPage() {
                 </div>
 
                 {/* Integration Recommendations */}
-                <IntegrationProvider>
-                    <div className="px-4">
-                        <IntegrationRecommendations />
-                    </div>
-                </IntegrationProvider>
+                <div className="px-4">
+                    <IntegrationRecommendations />
+                </div>
 
                 <AutomationPipeline />
 
@@ -46,9 +44,7 @@ export default async function AutomationPage() {
                         {/* Running Integration Automations */}
                         <div className="border border-stone-200 dark:border-stone-800 rounded-xl p-6 bg-white dark:bg-stone-900/50">
                             <h2 className="text-lg font-semibold mb-4">Integration Automations</h2>
-                            <IntegrationProvider>
-                                <RunningAutomations />
-                            </IntegrationProvider>
+                            <RunningAutomations />
                         </div>
 
                         <ClientInsights />

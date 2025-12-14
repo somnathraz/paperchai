@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { TemplateSidebar } from "./modern-editor/template-sidebar";
 import { CanvasPreview } from "./modern-editor/canvas-preview";
@@ -196,13 +196,13 @@ export function ModernEditor({
     }
   }, []);
 
-  const showToast = (type: "success" | "error", message: string) => {
+  const showToast = useCallback((type: "success" | "error", message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 3000);
-  };
+  }, []);
 
   // Helper to populate invoice items from a project
-  const populateItemsFromProject = (project: any) => {
+  const populateItemsFromProject = useCallback((project: any) => {
     const newItems: any[] = [];
 
     // 1. Billable Items (Fixed/Retainer items)
@@ -235,9 +235,9 @@ export function ModernEditor({
     } else {
       showToast("error", "No billable items or ready milestones found in this project.");
     }
-  };
+  }, [showToast]);
 
-  const handleClientUpdate = async (
+  const handleClientUpdate = useCallback(async (
     clientId: string,
     data: Partial<{ email: string; phone: string; addressLine1: string; addressLine2: string; city: string; state: string; postalCode: string; country: string }>
   ) => {
@@ -254,7 +254,378 @@ export function ModernEditor({
     } else {
       throw new Error("Failed to update client");
     }
-  };
+  }, []);
+
+  const handleAIReview = useCallback(async () => {
+    setAiReviewOpen(true);
+    setAiReviewLoading(true);
+    try {
+      const res = await fetch("/api/ai-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...formState,
+          items: formState.items,
+          taxSettings: formState.taxSettings,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAiReviewResult(data);
+      } else {
+        showToast("error", "Failed to analyze invoice");
+      }
+    } catch (error) {
+      console.error("AI Review error:", error);
+      showToast("error", "Failed to analyze invoice");
+    } finally {
+      setAiReviewLoading(false);
+    }
+  }, [formState, showToast]);
+
+  const handleSaveDraft = useCallback(async () => {
+    if (!formState.clientId) {
+      showToast("error", "Select a client before saving.");
+      return;
+    }
+    // Auto-generate invoice number if not provided
+    const invoiceData = {
+      ...formState,
+      number: formState.number || `DRAFT-${Date.now()}`,
+      templateSlug: currentTemplate,
+      sections,
+      reminderCadence: formState.reminderCadence,
+      attachments: formState.attachments,
+    };
+
+    const res = await fetch("/api/invoices/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(invoiceData),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const savedId = data.invoice.id;
+
+      setSavedInvoiceId(savedId);
+      setInvoiceStatus(data.invoice.status);
+      setLastSentAt(data.invoice.lastSentAt);
+
+      // Save reminder settings
+      if (formState.remindersEnabled !== undefined) {
+        try {
+          await fetch(`/api/invoices/${savedId}/reminders`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              enabled: formState.remindersEnabled,
+              useDefaults: formState.reminderSchedule?.useDefaults,
+              steps: formState.reminderSchedule?.steps,
+            }),
+          });
+        } catch (err) {
+          console.error("Failed to save reminders", err);
+        }
+      }
+
+      // Update form state with the generated number if it was auto-generated
+      if (!formState.number) {
+        setFormState(prev => ({ ...prev, number: invoiceData.number }));
+      }
+      showToast("success", "Draft saved successfully");
+    } else {
+      const error = await res.json();
+      showToast("error", error.error || "Failed to save draft");
+    }
+  }, [formState, currentTemplate, sections, showToast]);
+
+  const handleSchedule = useCallback(async (payload: any) => {
+    if (!formState.clientId) {
+      showToast("error", "Select a client before scheduling.");
+      return;
+    }
+    // Auto-generate invoice number if not provided
+    const invoiceData = {
+      ...formState,
+      number: formState.number || `DRAFT-${Date.now()}`,
+      templateSlug: currentTemplate,
+      sections,
+      reminderCadence: formState.reminderCadence,
+      attachments: formState.attachments,
+    };
+
+    let invoiceId = savedInvoiceId;
+    if (!invoiceId) {
+      // Save the invoice first if not already saved
+      const res = await fetch("/api/invoices/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(invoiceData),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        console.log("Save response data:", data);
+        invoiceId = data.invoice?.id;
+        if (!invoiceId) {
+          console.error("Save response missing invoice ID:", data);
+          showToast("error", "Failed to get invoice ID after saving.");
+          return;
+        }
+        console.log("Invoice ID obtained:", invoiceId);
+        setSavedInvoiceId(invoiceId);
+        // Update form state with the generated number if it was auto-generated
+        if (!formState.number) {
+          setFormState(prev => ({ ...prev, number: invoiceData.number }));
+        }
+      } else {
+        const errorText = await res.text();
+        let error;
+        try {
+          error = JSON.parse(errorText);
+        } catch {
+          error = { error: errorText || "Unknown error" };
+        }
+        console.error("Save error:", error);
+        showToast("error", error.error || "Failed to save invoice before scheduling.");
+        return;
+      }
+    }
+
+    // Ensure we have an invoiceId before scheduling
+    if (!invoiceId) {
+      showToast("error", "Invoice ID is missing. Please save the invoice first.");
+      return;
+    }
+
+    // Validate that we have all required fields
+    if (!payload.when) {
+      showToast("error", "Select a date and time for scheduling.");
+      return;
+    }
+
+    // Now schedule the invoice
+    const schedulePayload = {
+      invoiceId,
+      scheduledSendAt: payload.when,
+      channel: payload.channel || "email",
+      templateSlug: currentTemplate,
+      reminderCadence: formState.reminderCadence,
+    };
+
+    console.log("Scheduling with payload:", schedulePayload);
+
+    const scheduleRes = await fetch("/api/invoices/schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(schedulePayload),
+    });
+
+    if (scheduleRes.ok) {
+      showToast("success", "Invoice scheduled successfully");
+    } else {
+      const error = await scheduleRes.json();
+      showToast("error", error.error || "Failed to schedule invoice.");
+    }
+  }, [formState, currentTemplate, sections, savedInvoiceId, showToast]);
+
+  const handleSend = useCallback(async (payload: any) => {
+    if (!formState.clientId) {
+      showToast("error", "Select a client before sending.");
+      return;
+    }
+    let invoiceId = savedInvoiceId;
+    if (!invoiceId) {
+      const res = await fetch("/api/invoices/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formState),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        invoiceId = data.invoice.id;
+        setSavedInvoiceId(invoiceId);
+      } else {
+        showToast("error", "Failed to save invoice before sending.");
+        return;
+      }
+    }
+    const sendRes = await fetch("/api/invoices/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ invoiceId, channel: payload.channel }),
+    });
+
+    if (sendRes.ok) {
+      const data = await sendRes.json();
+      if (data.invoice) {
+        setInvoiceStatus(data.invoice.status);
+        setLastSentAt(data.invoice.lastSentAt);
+      }
+      showToast("success", "Invoice sent");
+    } else {
+      showToast("error", "Failed to send invoice");
+    }
+  }, [formState, savedInvoiceId, showToast]);
+
+  const handleOpenSendModal = useCallback(() => {
+    if (!formState.clientId) {
+      showToast("error", "Please select a client before sending.");
+      return;
+    }
+    setSendModalOpen(true);
+  }, [formState.clientId, showToast]);
+
+  const handleFormStateChange = useCallback((newState: InvoiceFormState) => {
+    // Logic to reset sent status if key fields change (creating a new invoice context)
+    if (lastSentAt || invoiceStatus === "sent") {
+      if (newState.clientId !== formState.clientId || newState.projectId !== formState.projectId) {
+        setSavedInvoiceId(undefined);
+        setInvoiceStatus(undefined);
+        setLastSentAt(undefined);
+        showToast("success", "Started new invoice");
+      }
+    }
+    setFormState(newState);
+  }, [formState.clientId, formState.projectId, lastSentAt, invoiceStatus, showToast]);
+
+  const handleSendInvoiceFromModal = useCallback(async (options: any) => {
+    if (!formState.clientId) {
+      showToast("error", "Select a client before sending.");
+      return;
+    }
+    let invoiceId = savedInvoiceId;
+    if (!invoiceId) {
+      const res = await fetch("/api/invoices/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formState),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        invoiceId = data.invoice.id;
+        setSavedInvoiceId(invoiceId);
+      } else {
+        showToast("error", "Failed to save invoice before sending.");
+        return;
+      }
+    }
+
+    // Send the invoice
+    const sendRes = await fetch("/api/invoices/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        invoiceId,
+        channel: options.channel,
+        automationEnabled: options.automationEnabled,
+        reminderSettings: options.reminderSettings,
+      }),
+    });
+
+    if (sendRes.ok) {
+      const data = await sendRes.json();
+      if (data.invoice) {
+        setInvoiceStatus(data.invoice.status);
+        setLastSentAt(data.invoice.lastSentAt);
+      }
+      showToast("success", "Invoice sent successfully!");
+    } else {
+      showToast("error", "Failed to send invoice.");
+    }
+  }, [formState, savedInvoiceId, showToast]);
+
+  const handleAIReviewApplyFix = useCallback((issue: ReviewIssue) => {
+    console.log("Applying fix:", issue);
+    if (issue.autoFix) {
+      const { field, value } = issue.autoFix;
+      console.log("Fix field:", field, "Value:", value);
+
+      if (field === "taxRate") {
+        // Apply tax rate to all items
+        setFormState(prev => ({
+          ...prev,
+          items: prev.items.map(item => ({ ...item, taxRate: value })),
+        }));
+      } else if (field === "notes") {
+        setFormState(prev => ({ ...prev, notes: value }));
+      } else if (field === "terms") {
+        setFormState(prev => ({ ...prev, terms: value }));
+      } else if (field === "dueDate") {
+        setFormState(prev => ({ ...prev, dueDate: value }));
+      } else if (field === "currency") {
+        setFormState(prev => ({ ...prev, currency: value }));
+      } else {
+        // Generic field update
+        setFormState(prev => ({ ...prev, [field]: value }));
+      }
+      showToast("success", `✓ Applied: ${issue.autoFix.label}`);
+    }
+  }, [showToast]);
+
+  const handleAIReviewApplySuggestion = useCallback((suggestion: ReviewSuggestion) => {
+    console.log("Applying suggestion:", suggestion);
+    if (suggestion.type === "description") {
+      setFormState(prev => ({
+        ...prev,
+        items: prev.items.map(item =>
+          item.title?.toLowerCase().trim() === suggestion.original.toLowerCase().trim()
+            ? { ...item, title: suggestion.improved }
+            : item
+        ),
+      }));
+      showToast("success", `Updated: "${suggestion.original}" → "${suggestion.improved}"`);
+    }
+  }, [showToast]);
+
+  const handleAIReviewApplyAllFixes = useCallback(() => {
+    console.log("Applying all fixes");
+    if (aiReviewResult) {
+      let fixCount = 0;
+      const updates: Partial<InvoiceFormState> = {};
+      let itemsUpdated = false;
+      let newTaxRate: number | undefined;
+
+      aiReviewResult.issues.forEach(issue => {
+        if (issue.autoFix) {
+          const { field, value } = issue.autoFix;
+          fixCount++;
+
+          if (field === "taxRate") {
+            newTaxRate = value;
+            itemsUpdated = true;
+          } else if (field === "notes") {
+            updates.notes = value;
+          } else if (field === "terms") {
+            updates.terms = value;
+          } else if (field === "dueDate") {
+            updates.dueDate = value;
+          } else if (field === "currency") {
+            updates.currency = value;
+          }
+        }
+      });
+
+      // Apply all updates in one state change
+      setFormState(prev => {
+        const newState = { ...prev, ...updates };
+        if (itemsUpdated && newTaxRate !== undefined) {
+          newState.items = prev.items.map(item => ({ ...item, taxRate: newTaxRate }));
+        }
+        return newState;
+      });
+
+      showToast("success", `✓ Applied ${fixCount} fixes`);
+    }
+  }, [aiReviewResult, showToast]);
+
+  const invoiceTotals = useMemo(() => {
+    const subtotal = formState.items.reduce((sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0), 0);
+    const taxRate = formState.taxSettings?.defaultRate || 0;
+    const tax = subtotal * (taxRate / 100);
+    const total = subtotal + tax;
+    return { subtotal, tax, total };
+  }, [formState.items, formState.taxSettings?.defaultRate]);
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-white">
@@ -265,222 +636,12 @@ export function ModernEditor({
         lastSentAt={lastSentAt}
         hasAutomation={!!(formState.remindersEnabled && formState.reminderSchedule?.steps?.length)}
         templateName={selectedTemplateName || "Classic Gray"}
-        onAIReview={async () => {
-          setAiReviewOpen(true);
-          setAiReviewLoading(true);
-          try {
-            const res = await fetch("/api/ai-review", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                ...formState,
-                items: formState.items,
-                taxSettings: formState.taxSettings,
-              }),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              setAiReviewResult(data);
-            } else {
-              showToast("error", "Failed to analyze invoice");
-            }
-          } catch (error) {
-            console.error("AI Review error:", error);
-            showToast("error", "Failed to analyze invoice");
-          } finally {
-            setAiReviewLoading(false);
-          }
-        }}
+        onAIReview={handleAIReview}
         aiReviewIssueCount={aiReviewResult?.issues.length}
-        onSaveDraft={async () => {
-          if (!formState.clientId) {
-            showToast("error", "Select a client before saving.");
-            return;
-          }
-          // Auto-generate invoice number if not provided
-          const invoiceData = {
-            ...formState,
-            number: formState.number || `DRAFT-${Date.now()}`,
-            templateSlug: selectedTemplate,
-            sections,
-            reminderCadence: formState.reminderCadence,
-            attachments: formState.attachments,
-          };
-
-          const res = await fetch("/api/invoices/save", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(invoiceData),
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            const savedId = data.invoice.id;
-
-            setSavedInvoiceId(savedId);
-            setInvoiceStatus(data.invoice.status);
-            setLastSentAt(data.invoice.lastSentAt);
-
-            // Save reminder settings
-            if (formState.remindersEnabled !== undefined) {
-              try {
-                await fetch(`/api/invoices/${savedId}/reminders`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    enabled: formState.remindersEnabled,
-                    useDefaults: formState.reminderSchedule?.useDefaults,
-                    steps: formState.reminderSchedule?.steps,
-                  }),
-                });
-              } catch (err) {
-                console.error("Failed to save reminders", err);
-              }
-            }
-
-            // Update form state with the generated number if it was auto-generated
-            if (!formState.number) {
-              setFormState(prev => ({ ...prev, number: invoiceData.number }));
-            }
-            showToast("success", "Draft saved successfully");
-          } else {
-            const error = await res.json();
-            showToast("error", error.error || "Failed to save draft");
-          }
-        }}
-        onSchedule={async (payload) => {
-          if (!formState.clientId) {
-            showToast("error", "Select a client before scheduling.");
-            return;
-          }
-          // Auto-generate invoice number if not provided
-          const invoiceData = {
-            ...formState,
-            number: formState.number || `DRAFT-${Date.now()}`,
-            templateSlug: selectedTemplate,
-            sections,
-            reminderCadence: formState.reminderCadence,
-            attachments: formState.attachments,
-          };
-
-          let invoiceId = savedInvoiceId;
-          if (!invoiceId) {
-            // Save the invoice first if not already saved
-            const res = await fetch("/api/invoices/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(invoiceData),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              console.log("Save response data:", data);
-              invoiceId = data.invoice?.id;
-              if (!invoiceId) {
-                console.error("Save response missing invoice ID:", data);
-                showToast("error", "Failed to get invoice ID after saving.");
-                return;
-              }
-              console.log("Invoice ID obtained:", invoiceId);
-              setSavedInvoiceId(invoiceId);
-              // Update form state with the generated number if it was auto-generated
-              if (!formState.number) {
-                setFormState(prev => ({ ...prev, number: invoiceData.number }));
-              }
-            } else {
-              const errorText = await res.text();
-              let error;
-              try {
-                error = JSON.parse(errorText);
-              } catch {
-                error = { error: errorText || "Unknown error" };
-              }
-              console.error("Save error:", error);
-              showToast("error", error.error || "Failed to save invoice before scheduling.");
-              return;
-            }
-          }
-
-          // Ensure we have an invoiceId before scheduling
-          if (!invoiceId) {
-            showToast("error", "Invoice ID is missing. Please save the invoice first.");
-            return;
-          }
-
-          // Validate that we have all required fields
-          if (!payload.when) {
-            showToast("error", "Select a date and time for scheduling.");
-            return;
-          }
-
-          // Now schedule the invoice
-          const schedulePayload = {
-            invoiceId,
-            scheduledSendAt: payload.when,
-            channel: payload.channel || "email",
-            templateSlug: selectedTemplate,
-            reminderCadence: formState.reminderCadence,
-          };
-
-          console.log("Scheduling with payload:", schedulePayload);
-
-          const scheduleRes = await fetch("/api/invoices/schedule", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(schedulePayload),
-          });
-
-          if (scheduleRes.ok) {
-            showToast("success", "Invoice scheduled successfully");
-          } else {
-            const error = await scheduleRes.json();
-            showToast("error", error.error || "Failed to schedule invoice.");
-          }
-        }}
-        onSend={async (payload) => {
-          if (!formState.clientId) {
-            showToast("error", "Select a client before sending.");
-            return;
-          }
-          let invoiceId = savedInvoiceId;
-          if (!invoiceId) {
-            const res = await fetch("/api/invoices/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(formState),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              invoiceId = data.invoice.id;
-              setSavedInvoiceId(invoiceId);
-            } else {
-              showToast("error", "Failed to save invoice before sending.");
-              return;
-            }
-          }
-          const sendRes = await fetch("/api/invoices/send", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ invoiceId, channel: payload.channel }),
-          });
-
-          if (sendRes.ok) {
-            const data = await sendRes.json();
-            if (data.invoice) {
-              setInvoiceStatus(data.invoice.status);
-              setLastSentAt(data.invoice.lastSentAt);
-            }
-            showToast("success", "Invoice sent");
-          } else {
-            showToast("error", "Failed to send invoice");
-          }
-        }}
-        onOpenSendModal={() => {
-          if (!formState.clientId) {
-            showToast("error", "Please select a client before sending.");
-            return;
-          }
-          setSendModalOpen(true);
-        }}
+        onSaveDraft={handleSaveDraft}
+        onSchedule={handleSchedule}
+        onSend={handleSend}
+        onOpenSendModal={handleOpenSendModal}
       />
 
       {/* Main layout: Left Properties | Center Canvas | Right Templates Drawer */}
@@ -488,18 +649,7 @@ export function ModernEditor({
         {/* Left: Properties Panel (320px, collapsible) */}
         <PropertiesPanel
           formState={formState}
-          onFormStateChange={(newState) => {
-            // Logic to reset sent status if key fields change (creating a new invoice context)
-            if (lastSentAt || invoiceStatus === "sent") {
-              if (newState.clientId !== formState.clientId || newState.projectId !== formState.projectId) {
-                setSavedInvoiceId(undefined);
-                setInvoiceStatus(undefined);
-                setLastSentAt(undefined);
-                showToast("success", "Started new invoice");
-              }
-            }
-            setFormState(newState);
-          }}
+          onFormStateChange={handleFormStateChange}
           clients={clients}
           projects={projects}
           sections={sections}
@@ -619,9 +769,9 @@ export function ModernEditor({
         onOpenChange={setSendModalOpen}
         invoice={{
           number: formState.number || "Draft",
-          total: formState.items.reduce((sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0), 0) * (1 + (formState.taxSettings?.defaultRate || 0) / 100),
-          subtotal: formState.items.reduce((sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0), 0),
-          tax: formState.items.reduce((sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0), 0) * ((formState.taxSettings?.defaultRate || 0) / 100),
+          total: invoiceTotals.total,
+          subtotal: invoiceTotals.subtotal,
+          tax: invoiceTotals.tax,
           dueDate: formState.dueDate ? new Date(formState.dueDate).toISOString() : undefined,
           items: formState.items.map(item => ({
             name: item.title,
@@ -635,51 +785,7 @@ export function ModernEditor({
         project={projects.find(p => p.id === formState.projectId)}
         templateName={selectedTemplateName || "Classic Gray"}
         initialAutomationEnabled={!!(formState.remindersEnabled && formState.reminderSchedule?.steps?.length)}
-        onSend={async (options) => {
-          if (!formState.clientId) {
-            showToast("error", "Select a client before sending.");
-            return;
-          }
-          let invoiceId = savedInvoiceId;
-          if (!invoiceId) {
-            const res = await fetch("/api/invoices/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(formState),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              invoiceId = data.invoice.id;
-              setSavedInvoiceId(invoiceId);
-            } else {
-              showToast("error", "Failed to save invoice before sending.");
-              return;
-            }
-          }
-
-          // Send the invoice
-          const sendRes = await fetch("/api/invoices/send", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              invoiceId,
-              channel: options.channel,
-              automationEnabled: options.automationEnabled,
-              reminderSettings: options.reminderSettings,
-            }),
-          });
-
-          if (sendRes.ok) {
-            const data = await sendRes.json();
-            if (data.invoice) {
-              setInvoiceStatus(data.invoice.status);
-              setLastSentAt(data.invoice.lastSentAt);
-            }
-            showToast("success", "Invoice sent successfully!");
-          } else {
-            showToast("error", "Failed to send invoice.");
-          }
-        }}
+        onSend={handleSendInvoiceFromModal}
       />
 
       {/* AI Review Panel */}
@@ -688,87 +794,9 @@ export function ModernEditor({
         onClose={() => setAiReviewOpen(false)}
         reviewResult={aiReviewResult}
         isLoading={aiReviewLoading}
-        onApplyFix={(issue) => {
-          console.log("Applying fix:", issue);
-          if (issue.autoFix) {
-            const { field, value } = issue.autoFix;
-            console.log("Fix field:", field, "Value:", value);
-
-            if (field === "taxRate") {
-              // Apply tax rate to all items
-              setFormState(prev => ({
-                ...prev,
-                items: prev.items.map(item => ({ ...item, taxRate: value })),
-              }));
-            } else if (field === "notes") {
-              setFormState(prev => ({ ...prev, notes: value }));
-            } else if (field === "terms") {
-              setFormState(prev => ({ ...prev, terms: value }));
-            } else if (field === "dueDate") {
-              setFormState(prev => ({ ...prev, dueDate: value }));
-            } else if (field === "currency") {
-              setFormState(prev => ({ ...prev, currency: value }));
-            } else {
-              // Generic field update
-              setFormState(prev => ({ ...prev, [field]: value }));
-            }
-            showToast("success", `✓ Applied: ${issue.autoFix.label}`);
-          }
-        }}
-        onApplySuggestion={(suggestion) => {
-          console.log("Applying suggestion:", suggestion);
-          if (suggestion.type === "description") {
-            setFormState(prev => ({
-              ...prev,
-              items: prev.items.map(item =>
-                item.title?.toLowerCase().trim() === suggestion.original.toLowerCase().trim()
-                  ? { ...item, title: suggestion.improved }
-                  : item
-              ),
-            }));
-            showToast("success", `Updated: "${suggestion.original}" → "${suggestion.improved}"`);
-          }
-        }}
-        onApplyAllFixes={() => {
-          console.log("Applying all fixes");
-          if (aiReviewResult) {
-            let fixCount = 0;
-            const updates: Partial<InvoiceFormState> = {};
-            let itemsUpdated = false;
-            let newTaxRate: number | undefined;
-
-            aiReviewResult.issues.forEach(issue => {
-              if (issue.autoFix) {
-                const { field, value } = issue.autoFix;
-                fixCount++;
-
-                if (field === "taxRate") {
-                  newTaxRate = value;
-                  itemsUpdated = true;
-                } else if (field === "notes") {
-                  updates.notes = value;
-                } else if (field === "terms") {
-                  updates.terms = value;
-                } else if (field === "dueDate") {
-                  updates.dueDate = value;
-                } else if (field === "currency") {
-                  updates.currency = value;
-                }
-              }
-            });
-
-            // Apply all updates in one state change
-            setFormState(prev => {
-              const newState = { ...prev, ...updates };
-              if (itemsUpdated && newTaxRate !== undefined) {
-                newState.items = prev.items.map(item => ({ ...item, taxRate: newTaxRate }));
-              }
-              return newState;
-            });
-
-            showToast("success", `✓ Applied ${fixCount} fixes`);
-          }
-        }}
+        onApplyFix={handleAIReviewApplyFix}
+        onApplySuggestion={handleAIReviewApplySuggestion}
+        onApplyAllFixes={handleAIReviewApplyAllFixes}
       />
     </div>
   );

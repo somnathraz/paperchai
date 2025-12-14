@@ -142,6 +142,7 @@ export default function BackendDocsPage() {
 
                     <Card>
                         <CardContent className="p-0">
+                            <p className="text-sm text-muted-foreground px-6 py-4">Ensure user&apos;s activeWorkspaceId is set</p>
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-muted/50 text-muted-foreground uppercase text-xs">
                                     <tr>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, memo } from "react";
 import { ArrowLeft, Save, Clock, Send, Download, Sparkles } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
@@ -35,7 +35,7 @@ type EditorHeaderProps = {
   hasAutomation?: boolean;
 };
 
-export function EditorHeader({
+export const EditorHeader = memo(function EditorHeader({
   invoiceId,
   templateName,
   onSaveDraft,
@@ -247,4 +247,4 @@ export function EditorHeader({
       </Dialog>
     </div>
   );
-}
+});
