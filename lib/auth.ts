@@ -104,7 +104,8 @@ export const authOptions: NextAuthOptions = {
 
         if (dbUser) {
           const workspace =
-            dbUser.activeWorkspace || (await ensureActiveWorkspace(dbUser.id, dbUser.name ?? dbUser.email));
+            dbUser.activeWorkspace ||
+            (await ensureActiveWorkspace(dbUser.id, dbUser.name ?? dbUser.email));
 
           token.name = dbUser.name ?? token.name;
           token.role = dbUser.role ?? "Founder";
@@ -127,11 +128,10 @@ export const authOptions: NextAuthOptions = {
         session.user.currency = (token.currency as string) || undefined;
         session.user.reminderTone = (token.reminderTone as string) || undefined;
         session.user.backupEmail = (token.backupEmail as string) || undefined;
-        session.user.workspaceId = (token.workspaceId as string) || undefined;
+        session.user.activeWorkspaceId = (token.workspaceId as string) || undefined;
         session.user.workspaceName = (token.workspaceName as string) || undefined;
       }
       return session;
     },
   },
 };
-
