@@ -4,17 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { DashboardLayout } from "@/components/dashboard/layout-shell";
 import { DashboardTabNav } from "@/components/dashboard/dashboard-tabs";
 import { FabActions } from "@/components/dashboard/fab-actions";
-import { generateMetadata as genMeta } from "@/lib/seo-config";
 
-export const metadata = genMeta({
-  title: "Dashboard - Invoice Management",
-  description:
-    "Your freelance invoice command center. View unpaid invoices, client reliability scores, payment reminders, and cash flow insights.",
-  path: "/dashboard",
-  noIndex: true,
-});
-
-// Import all server components
+// Import all dashboard components
 import { StatsCards } from "@/features/dashboard/components/StatsCards";
 import { CashflowWidget } from "@/features/dashboard/components/CashflowWidget";
 import { AutomationLifecycle } from "@/components/dashboard/automation-lifecycle";
@@ -29,7 +20,7 @@ import { IntegrationPanel } from "@/components/dashboard/integration-panel";
 import { IntegrationProvider } from "@/lib/hooks/use-integration";
 
 type Props = {
-  searchParams: { tab?: string };
+  searchParams: Promise<{ tab?: string }>;
 };
 
 export default async function DashboardPage({ searchParams }: Props) {
@@ -41,7 +32,8 @@ export default async function DashboardPage({ searchParams }: Props) {
 
   const firstName =
     session.user?.name?.split(" ")[0] ?? session.user?.email?.split("@")[0] ?? "there";
-  const activeTab = searchParams.tab || "overview";
+  const params = await searchParams;
+  const activeTab = params.tab || "overview";
 
   return (
     <DashboardLayout userName={session.user?.name} userEmail={session.user?.email}>
