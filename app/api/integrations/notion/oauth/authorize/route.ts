@@ -28,22 +28,19 @@ export async function GET(request: NextRequest) {
     //         new URL("/settings/billing?error=premium_required&feature=notion", request.url)
     //     );
     // }
+    // 3. Get or create workspace
+    const { ensureActiveWorkspace } = await import("@/lib/workspace");
+    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
 
-    // 3. Get workspace ID from database
-    const { prisma } = await import("@/lib/prisma");
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { activeWorkspaceId: true },
-    });
-
-    const workspaceId = user?.activeWorkspaceId;
-    if (!workspaceId) {
-      return NextResponse.redirect(new URL("/settings/workspace?error=no_workspace", request.url));
+    if (!workspace) {
+      return NextResponse.redirect(
+        new URL("/settings/workspace?error=workspace_creation_failed", request.url)
+      );
     }
 
     // 4. Generate CSRF state
     const redirectTo = request.nextUrl.searchParams.get("next") || undefined;
-    const state = generateOAuthState(workspaceId, redirectTo);
+    const state = generateOAuthState(workspace.id, redirectTo);
 
     // 5. Build Notion OAuth URL
     const clientId = process.env.NOTION_CLIENT_ID;
