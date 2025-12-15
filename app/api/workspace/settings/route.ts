@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { ensureActiveWorkspace } from "@/lib/workspace";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -12,16 +13,11 @@ export async function GET() {
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      include: { activeWorkspace: true },
-    });
+    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
 
-    if (!user || !user.activeWorkspace) {
+    if (!workspace) {
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
-
-    const workspace = user.activeWorkspace;
 
     return NextResponse.json({
       id: workspace.id,
@@ -63,7 +59,10 @@ export async function PATCH(req: Request) {
 
     // Check if user is workspace owner
     if (user.activeWorkspace.ownerId !== user.id) {
-      return NextResponse.json({ error: "Only workspace owner can update settings" }, { status: 403 });
+      return NextResponse.json(
+        { error: "Only workspace owner can update settings" },
+        { status: 403 }
+      );
     }
 
     const body = await req.json();
