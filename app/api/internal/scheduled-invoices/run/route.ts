@@ -5,12 +5,32 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { getThemeHtml } from "@/lib/email-themes";
 import { replaceTemplateVariables, TemplateVars } from "@/lib/reminders";
+import { securityConfig } from "@/lib/security/security.config";
 
 // POST /api/internal/scheduled-invoices/run
 // This endpoint processes scheduled invoices and sends them
 // Should be called by a cron job (e.g., every minute or every 5 minutes)
 export async function POST(req: NextRequest) {
     try {
+        // Auth check: Require CRON_SECRET for production security
+        const authHeader = req.headers.get('authorization');
+        const cronHeader = req.headers.get(securityConfig.cron.secretHeader);
+        const expectedSecret = process.env.CRON_SECRET;
+
+        if (securityConfig.cron.requireAuth) {
+            if (!expectedSecret) {
+                console.error('[CRON] CRON_SECRET not configured');
+                return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
+            }
+
+            const providedSecret = cronHeader || (authHeader?.startsWith('Bearer ') && authHeader.slice(7));
+
+            if (providedSecret !== expectedSecret) {
+                console.warn('[CRON] Unauthorized scheduled-invoices/run attempt');
+                return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+            }
+        }
+
         console.log("Worker started: Processing scheduled invoices...");
 
         const now = new Date();

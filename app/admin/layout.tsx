@@ -67,7 +67,7 @@ export default async function AdminLayout({
                             System
                         </div>
                         <div className="space-y-1">
-                            <NavLink href="/admin/logs" icon={Code}>System Logs</NavLink>
+                            <NavLink href="/admin/system-logs" icon={Code}>System Logs</NavLink>
                         </div>
                     </div>
                 </nav>

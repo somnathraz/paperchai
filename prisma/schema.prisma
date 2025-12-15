@@ -760,3 +760,23 @@ enum ImportStatus {
   FAILED
 }
 
+// --- Security Audit Log ---
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String   // User who performed the action (or "SYSTEM" for cron jobs)
+  workspaceId String?  // Associated workspace (if applicable)
+  action      String   // Action type (e.g., "INVOICE_SENT", "LOGIN_FAILED")
+  resourceType String? // Type of resource (e.g., "INVOICE", "WORKSPACE")
+  resourceId  String?  // ID of the affected resource
+  metadata    Json?    // Additional context as JSON
+  ipAddress   String?  // Client IP address
+  userAgent   String?  // Client user agent
+  requestId   String?  // Request ID for correlation
+  createdAt   DateTime @default(now())
+  
+  @@index([userId, action])
+  @@index([workspaceId, action])
+  @@index([createdAt])
+  @@index([resourceType, resourceId])
+}

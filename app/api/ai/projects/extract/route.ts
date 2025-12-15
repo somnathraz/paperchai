@@ -1,254 +1,297 @@
-import { AI_CONFIG } from "@/lib/ai-config";
-import { generateContentSafe } from "@/lib/ai-service";
-import { getUserTier, TIER_LIMITS } from "@/lib/tier-limits";
-import { NextResponse } from "next/server";
+/**
+ * AI Project Extract API
+ * POST /api/ai/projects/extract
+ * 
+ * OWASP LLM Top 10 compliant:
+ * - Text-only extraction (never raw PDF to LLM)
+ * - Risk scoring
+ * - Structured output validation
+ * - Budget/caching
+ */
+
+import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import { AI_CONFIG } from "@/lib/ai-config";
+import { generateContentSafe } from "@/lib/ai-service";
+import { getUserTier, TIER_LIMITS } from "@/lib/tier-limits";
+import {
+    processAiInput,
+    validateAiOutput,
+    projectDataOutputSchema,
+    SYSTEM_PROMPTS,
+} from "@/lib/ai-prompt-security";
+import {
+    checkAiGuard,
+    acquireJobSlot,
+    releaseJobSlot,
+    cacheResult,
+    AiBudgetTier,
+} from "@/lib/ai-budget";
+import {
+    extractTextFromBuffer,
+    EXTRACTION_LIMITS,
+    ExtractionTier,
+} from "@/lib/document-extraction";
 
-export async function POST(req: Request) {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const tier = getUserTier(session.user.id, session.user.email || "");
-    const limits = TIER_LIMITS[tier];
-
-    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
-    if (!workspace) {
-        return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
-    }
-
-    const body = await req.json();
-    const { fileMeta, existingClientId } = body;
-
-    if (!fileMeta || !fileMeta.fileKey) {
-        return NextResponse.json({ error: "File metadata required" }, { status: 400 });
-    }
-
-    // Enforce File Size Limit
-    if (fileMeta.size > limits.maxFileSize) {
-        return NextResponse.json({
-            error: `File too large for ${tier} tier. Max size: ${limits.maxFileSize / (1024 * 1024)}MB. Upgrade to Premium for 10MB limits.`
-        }, { status: 403 });
-    }
+export async function POST(req: NextRequest) {
+    const startTime = Date.now();
+    let jobAcquired = false;
+    let workspaceId: string | null = null;
 
     try {
-        // 1. Fetch file content
-        let fileData = body.fileData || body.debugText || "";
-        const isBase64 = body.isBase64 || false;
-
-        if (!fileData && !body.debugText) {
-            fileData = "Contract for Website Redesign with Acme Corp. Total budget $5000. Milestone 1: Design (50%) due 2025-01-01. Milestone 2: Code (50%) due 2025-02-01.";
+        // 1. Authentication
+        const session = await getServerSession(authOptions);
+        if (!session?.user?.id) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const systemPrompt = `
-You are *Senior Legal & Project Manager AI* for PaperChai (Freelance Automation SaaS).
-Your goal is to extract **clean, strictly structured project data** from messy documents
-(contracts, proposals, PDFs, emails, SOWs).
-
-===========================
-1. EXTRACTION RULES (MANDATORY)
-===========================
-
-1. NEVER hallucinate missing amounts, dates, or milestone names.
-2. If unsure, leave a field empty or null.
-3. If multiple projects or services exist, output them as **separate project entries**.
-4. Identify the **client** (the payer) at ALL costs:
-   - Check signatures
-   - Check "Client" section
-   - Check email headers
-   - Check "Between:" or address blocks
-5. Identify the **service provider** but DO NOT include in output.
-6. Extract all **dates** as YYYY-MM-DD.
-7. Extract all money into **smallest units** (e.g., INR 12000 → 1200000 paise).
-8. Summaries must NOT introduce new information.
-9. Follow the JSON schema strictly.
-
-===========================
-2. WHAT TO DETECT
-===========================
-
-A. CLIENT DATA  
-- name  
-- email  
-- company  
-- phone  
-- notes (anything useful like GST, address, special terms)
-
-B. PROJECT STRUCTURE  
-For each project found in the document, detect:
-
-1. Project name (use section headings if unclear)
-2. Description (short)
-3. Project type:
-   - FIXED
-   - HOURLY
-   - RETAINER
-   - MILESTONE
-4. Billing strategy:
-   - PER_MILESTONE
-   - SINGLE_INVOICE
-   - RETAINER_MONTHLY
-   - HOURLY_TIMESHEET
-5. Currency (default to INR unless document clearly uses USD/EUR)
-6. Budget:
-   - If a total fee is described → convert to smallest units
-   - If hourly → no totalBudget
-   - If retainer → monthly fee = amount
-7. Start and end dates (infer year from context ONLY if safe)
-8. Milestones:
-   For each milestone:
-   - title
-   - description
-   - amount (convert to smallest unit)
-   - expectedDate (delivery date or estimated date)
-   - dueDate (payment due date, if given)
-   - If milestone is unclear → include it but leave missing fields null
-
-===========================
-3. HALLUCINATION PREVENTION
-===========================
-
-- If document contains ambiguous billing terms, list them in warnings.
-- If timeline is unclear, do NOT guess — leave null.
-- If amounts are missing, leave amount = null.
-- If multiple possible interpretations exist, pick the safer one and add warning:
-  “Ambiguous milestone structure—multiple interpretations possible.”
-
-===========================
-4. OUTPUT SCHEMA (STRICT)
-===========================
-
-Return ONLY valid JSON. No markdown, no text.
-
-{
-  "client": {
-     "name": "",
-     "email": "",
-     "company": "",
-     "phone": "",
-     "notes": ""
-  },
-  "projects": [
-    {
-      "name": "",
-      "description": "",
-      "type": "FIXED" | "HOURLY" | "RETAINER" | "MILESTONE",
-      "billingStrategy": "PER_MILESTONE" | "SINGLE_INVOICE" | "RETAINER_MONTHLY" | "HOURLY_TIMESHEET",
-      "totalBudget": null | number,
-      "currency": "INR",
-      "startDate": "",
-      "endDate": "",
-      "milestones": [
-        {
-          "title": "",
-          "description": "",
-          "amount": null | number,
-          "expectedDate": "",
-          "dueDate": ""
+        // 2. Get workspace
+        const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+        if (!workspace) {
+            return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
         }
-      ]
-    }
-  ],
-  "confidence": {
-     "client": 0.0,
-     "projects": 0.0
-  },
-  "warnings": []
-}
+        workspaceId = workspace.id;
 
-===========================
-5. FINAL SAFETY CHECK
-===========================
+        const userTier = getUserTier(session.user.id, session.user.email || "");
+        const limits = TIER_LIMITS[userTier];
+        const extractionTier = (userTier === "OWNER" ? "PROFESSIONAL" : userTier === "PREMIUM" ? "PROFESSIONAL" : "FREE") as ExtractionTier;
 
-Before outputting JSON:
+        // 3. Parse request
+        const body = await req.json();
+        const { fileMeta, existingClientId, fileData, isBase64, debugText } = body;
 
-- Ensure ALL amounts are numeric or null (no strings like "$4000").
-- Ensure dates follow "YYYY-MM-DD".
-- Ensure "type" and "billingStrategy" use EXACT enum strings.
-- Ensure JSON is valid, strict, minified if possible.
+        if (!fileMeta || !fileMeta.fileKey) {
+            return NextResponse.json({ error: "File metadata required" }, { status: 400 });
+        }
 
-Return JSON only. Never include explanation.
-`;
+        // 4. Enforce file size limit (tier-based)
+        const tierLimits = EXTRACTION_LIMITS[extractionTier] || EXTRACTION_LIMITS.FREE;
+        if (fileMeta.size > tierLimits.maxFileSizeBytes) {
+            const maxMB = Math.round(tierLimits.maxFileSizeBytes / 1024 / 1024);
+            return NextResponse.json({
+                error: `File too large for ${userTier} tier. Max: ${maxMB}MB.`
+            }, { status: 403 });
+        }
 
-        let promptParts: any[] = [{ text: systemPrompt }];
+        // 5. Extract TEXT ONLY from document (never raw PDF to LLM)
+        let textContent: string;
 
-        // Enforce Token Limit Approximation (Substring)
-        // 1 char ~= 1 byte. Token limit is rough.
-        const maxChars = limits.maxTokens * 4; // Very rough approx for char limit
+        if (debugText) {
+            // For debugging/testing
+            textContent = debugText;
+        } else if (isBase64 && fileData) {
+            // Decode base64 and extract text
+            const buffer = Buffer.from(fileData, "base64");
+            const extraction = await extractTextFromBuffer(
+                buffer,
+                fileMeta.mimeType,
+                fileMeta.fileName,
+                extractionTier
+            );
 
-        if (isBase64 && (fileMeta.mimeType === "application/pdf" || fileMeta.fileName.endsWith(".pdf"))) {
-            promptParts.push({
-                inlineData: {
-                    data: fileData,
-                    mimeType: "application/pdf"
-                }
-            });
-            promptParts.push({ text: "Extract details from the attached PDF document." });
+            if (!extraction.success) {
+                return NextResponse.json({
+                    error: extraction.error,
+                    errorCode: extraction.errorCode,
+                }, { status: 400 });
+            }
+
+            textContent = extraction.document!.textContent;
+
+            // Log if suspicious content detected
+            if (extraction.document!.metadata.hadInvisibleChars) {
+                console.warn("[AI SECURITY] Document had invisible unicode chars", {
+                    workspaceId,
+                    filename: fileMeta.fileName,
+                });
+            }
         } else {
-            promptParts[0].text += `\n\nInput Text:\n${fileData.substring(0, maxChars)}`;
+            // Fallback for testing
+            textContent = "Contract for Website Redesign with Acme Corp. Total budget $5000.";
         }
 
-        // 2. Call AI Service (Handles Fallback & Rate Limiting)
-        const text = await generateContentSafe({
-            modelName: limits.models.extraction, // Use tier-based model (though currently same)
-            fallbackModelName: AI_CONFIG.features.extraction.fallback,
-            promptParts: promptParts,
-            generationConfig: { responseMimeType: "application/json" },
+        // 6. Process through security layer
+        const securityContext = {
+            workspaceId,
             userId: session.user.id,
-            userTier: tier
+            action: "extract_project_data" as const,
+            sourceType: "extracted_text" as const,
+        };
+
+        const processed = processAiInput(textContent, securityContext);
+
+        // 7. Check risk
+        if (processed.riskAssessment.level === "critical") {
+            console.warn("[AI SECURITY] Blocked high-risk document", {
+                workspaceId,
+                userId: session.user.id,
+                riskScore: processed.riskAssessment.score,
+                flags: processed.riskAssessment.flags,
+            });
+            return NextResponse.json({
+                error: "Document contains content that cannot be processed.",
+                riskFlags: processed.riskAssessment.flags,
+            }, { status: 400 });
+        }
+
+        // 8. Check budget/cache
+        const budgetTier = (userTier === "PREMIUM" || userTier === "OWNER" ? "PROFESSIONAL" : "FREE") as AiBudgetTier;
+        const guard = await checkAiGuard(
+            workspaceId,
+            processed.contentHash,
+            "extract_project_data",
+            budgetTier,
+        );
+
+        // Return cached result if available
+        if (guard.cachedResult) {
+            return NextResponse.json({
+                extract: guard.cachedResult,
+                cached: true,
+            });
+        }
+
+        if (!guard.allowed) {
+            return NextResponse.json({
+                error: guard.error,
+                remaining: guard.budgetCheck.remaining,
+            }, { status: 429 });
+        }
+
+        // 9. Acquire job slot
+        acquireJobSlot(workspaceId);
+        jobAcquired = true;
+
+        // 10. Call AI with strict system prompt
+        const text = await generateContentSafe({
+            modelName: limits.models.extraction,
+            fallbackModelName: AI_CONFIG.features.extraction.fallback,
+            systemInstruction: SYSTEM_PROMPTS.extract_project_data,
+            promptParts: [{ text: `Extract project data from:\n\n${processed.sanitizedContent}` }],
+            generationConfig: {
+                responseMimeType: "application/json",
+                temperature: 0.2,
+            },
+            userId: session.user.id,
+            userTier: userTier === "FREE" ? "FREE" : "PREMIUM",
         });
 
-        // Clean markdown if present
+        // 11. Validate output
         const cleanText = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        const validationResult = validateAiOutput(cleanText, projectDataOutputSchema);
 
-        let extract = JSON.parse(cleanText);
+        if (!validationResult.success) {
+            // Fallback: try parsing as legacy format
+            try {
+                const legacyExtract = JSON.parse(cleanText);
 
-        // 3. Persist ProjectDocument result
+                // Persist result
+                await prisma.projectDocument.create({
+                    data: {
+                        workspaceId,
+                        clientId: existingClientId,
+                        fileKey: fileMeta.fileKey,
+                        fileName: fileMeta.fileName,
+                        mimeType: fileMeta.mimeType,
+                        size: fileMeta.size || 0,
+                        sourceType: "OTHER",
+                        aiStatus: "PROCESSED",
+                        aiExtract: legacyExtract,
+                        aiSummary: `Extracted ${legacyExtract.projects?.length || 1} project(s)`,
+                        createdByUserId: session.user.id,
+                    },
+                });
+
+                // Cache and return
+                cacheResult(guard.cacheKey, legacyExtract, "extract_project_data");
+
+                return NextResponse.json({
+                    extract: legacyExtract,
+                    cached: false,
+                });
+            } catch {
+                console.error("[AI] Invalid output:", validationResult.error);
+                return NextResponse.json({
+                    error: "AI returned invalid data. Please try again.",
+                }, { status: 500 });
+            }
+        }
+
+        // 12. Persist validated result
+        const extract = validationResult.data;
         await prisma.projectDocument.create({
             data: {
-                workspaceId: workspace.id,
+                workspaceId,
                 clientId: existingClientId,
                 fileKey: fileMeta.fileKey,
                 fileName: fileMeta.fileName,
                 mimeType: fileMeta.mimeType,
                 size: fileMeta.size || 0,
-                sourceType: "OTHER", // Could detect from mimeType
+                sourceType: "OTHER",
                 aiStatus: "PROCESSED",
                 aiExtract: extract,
-                aiSummary: `Extracted ${extract.projects?.length || 1} projects. Main: ${extract.projects?.[0]?.name || extract.project?.name}`,
-                createdByUserId: session.user.id
-            }
+                aiSummary: `Project: ${extract.name}`,
+                createdByUserId: session.user.id,
+            },
         });
 
-        return NextResponse.json({ extract });
+        // 13. Cache result
+        cacheResult(guard.cacheKey, extract, "extract_project_data");
+
+        // 14. Audit log
+        await prisma.auditLog.create({
+            data: {
+                userId: session.user.id,
+                workspaceId,
+                action: "AI_EXTRACT",
+                resourceType: "PROJECT",
+                metadata: {
+                    filename: fileMeta.fileName,
+                    riskScore: processed.riskAssessment.score,
+                    confidence: extract.confidence,
+                    durationMs: Date.now() - startTime,
+                },
+            },
+        });
+
+        return NextResponse.json({
+            extract,
+            cached: false,
+        });
 
     } catch (error: any) {
         console.error("AI Extraction failed:", error);
 
-        // Log failure in DB
-        try {
-            await prisma.projectDocument.create({
-                data: {
-                    workspaceId: workspace.id,
-                    fileKey: fileMeta.fileKey,
-                    fileName: fileMeta.fileName || "unknown",
-                    mimeType: fileMeta.mimeType || "application/octet-stream",
-                    size: 0,
-                    aiStatus: "FAILED",
-                    createdByUserId: session.user.id
-                }
-            });
-        } catch (e) { /* ignore */ }
+        // Log failure
+        if (workspaceId) {
+            try {
+                const body = await req.clone().json().catch(() => ({}));
+                await prisma.projectDocument.create({
+                    data: {
+                        workspaceId,
+                        fileKey: body.fileMeta?.fileKey || "unknown",
+                        fileName: body.fileMeta?.fileName || "unknown",
+                        mimeType: "application/octet-stream",
+                        size: 0,
+                        aiStatus: "FAILED",
+                        createdByUserId: (await getServerSession(authOptions))?.user?.id || "unknown",
+                    },
+                });
+            } catch { /* ignore */ }
+        }
 
-        // Specific handling for user rate limit error
-        if (error.message?.includes("Rate limit exceeded")) {
+        if (error.message?.includes("Rate limit")) {
             return NextResponse.json({ error: error.message }, { status: 429 });
         }
 
         return NextResponse.json({ error: "Failed to extract data" }, { status: 500 });
+    } finally {
+        if (jobAcquired && workspaceId) {
+            releaseJobSlot(workspaceId);
+        }
     }
 }
+

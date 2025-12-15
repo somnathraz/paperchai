@@ -3,12 +3,31 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { replaceTemplateVariables, TemplateVars } from "@/lib/reminders";
 import { getThemeHtml } from "@/lib/email-themes"; // Reusing existing theme generator if possible or just raw body
+import { logCronEvent } from "@/lib/security/audit-log";
+import { securityConfig } from "@/lib/security/security.config";
 
 // POST /api/internal/reminders/run
 export async function POST(req: NextRequest) {
     try {
-        // Auth check: In production, check for a secret header or similar.
-        // For MVP, we'll allow it but log it.
+        // Auth check: Require CRON_SECRET for production security
+        const authHeader = req.headers.get('authorization');
+        const cronHeader = req.headers.get(securityConfig.cron.secretHeader);
+        const expectedSecret = process.env.CRON_SECRET;
+
+        if (securityConfig.cron.requireAuth) {
+            if (!expectedSecret) {
+                console.error('[CRON] CRON_SECRET not configured');
+                return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
+            }
+
+            const providedSecret = cronHeader || (authHeader?.startsWith('Bearer ') && authHeader.slice(7));
+
+            if (providedSecret !== expectedSecret) {
+                console.warn('[CRON] Unauthorized reminders/run attempt');
+                return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+            }
+        }
+
         console.log("Worker started: Processing reminders...");
 
         const now = new Date();

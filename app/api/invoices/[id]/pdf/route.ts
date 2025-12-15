@@ -1,14 +1,21 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import puppeteer from "puppeteer";
 import { headers } from "next/headers";
+import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // 1. Check Auth
   const session = await getServerSession(authOptions);
-  if (!session) {
+  if (!session?.user?.id) {
     return new NextResponse("Unauthorized", { status: 401 });
+  }
+
+  // 2. Rate limiting - 5 PDFs per minute per user (Puppeteer is resource-intensive)
+  const rateCheck = await checkRateLimitByProfile(req, "pdfGenerate", session.user.id);
+  if (!rateCheck.allowed) {
+    return new NextResponse("Too many PDF requests. Please wait a moment.", { status: 429 });
   }
 
   // 2. Extract Invoice ID from URL (since this is an API route in app dir, we need to parse it cleanly)

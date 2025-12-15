@@ -1,6 +1,6 @@
 "use server";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -8,13 +8,20 @@ import { ensureActiveWorkspace } from "@/lib/workspace";
 import { sendEmail } from "@/lib/email";
 import { getThemeHtml } from "@/lib/email-themes";
 import { replaceTemplateVariables, TemplateVars } from "@/lib/reminders";
+import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
   if (!workspace) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+
+  // Rate limiting - 20 emails per hour per workspace
+  const rateCheck = await checkRateLimitByProfile(req, "emailSend", workspace.id);
+  if (!rateCheck.allowed) {
+    return NextResponse.json({ error: "Too many emails sent. Please try again later." }, { status: 429 });
+  }
 
   const body = await req.json();
   const { invoiceId, channel = "email", templateSlug, notes, automationEnabled, reminderSettings } = body;

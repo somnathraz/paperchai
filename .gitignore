@@ -62,3 +62,7 @@ Thumbs.db
 logs/
 
 logo/
+
+# Internal documentation
+# Internal documentation
+/docs/

@@ -5,6 +5,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import { clientCreateSchema } from "@/lib/api-schemas";
+import { z } from "zod";
 
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
@@ -69,71 +71,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
 
+  // Validate input with Zod (sanitizes strings automatically)
   const body = await req.json();
-  const {
-    name,
-    email,
-    company,
-    phone,
-    whatsapp,
-    businessType,
-    tags,
-    categoryTags,
-    preferredPaymentMethod,
-    paymentTerms,
-    taxId,
-    lateFeeRules,
-    reminderChannel,
-    tonePreference,
-    escalationRule,
-    timezone,
-    currency,
-    preferredCurrency,
-    addressLine1,
-    addressLine2,
-    city,
-    state,
-    country,
-    postalCode,
-    notes,
-    internalNotes,
-  } = body;
-
-  if (!name) {
-    return NextResponse.json({ error: "Name is required" }, { status: 400 });
+  let validated;
+  try {
+    validated = clientCreateSchema.parse(body);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const firstError = error.issues[0];
+      return NextResponse.json(
+        { error: firstError.message, field: firstError.path[0] },
+        { status: 422 }
+      );
+    }
+    return NextResponse.json({ error: "Invalid input" }, { status: 400 });
   }
 
   const client = await prisma.client.create({
     data: {
-      name,
-      email,
-      company,
-      phone,
-      whatsapp,
-      businessType,
-      tags,
-      categoryTags,
-      preferredPaymentMethod,
-      paymentTerms,
-      taxId,
-      lateFeeRules,
-      reminderChannel,
-      tonePreference,
-      escalationRule,
-      timezone,
-      currency,
-      preferredCurrency,
-      addressLine1,
-      addressLine2,
-      city,
-      state,
-      country,
-      postalCode,
-      notes,
-      internalNotes,
+      ...validated,
       workspaceId: workspace.id,
     },
   });
 
   return NextResponse.json({ client });
 }
+

@@ -2,7 +2,8 @@
  * AI Invoice Generate API
  * POST /api/ai/invoice/generate
  * 
- * Uses Gemini to generate invoice items, notes, and terms from natural language prompts.
+ * Uses Gemini to generate invoice items from natural language prompts.
+ * OWASP LLM Top 10 compliant with prompt sanitization and output validation.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -10,124 +11,183 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { generateContentSafe } from "@/lib/ai-service";
 import { AI_CONFIG } from "@/lib/ai-config";
-
-const SYSTEM_PROMPT = `You are PaperChai AI, an expert invoice assistant. Your job is to generate professional invoice data from user prompts.
-
-ALWAYS respond with valid JSON in this exact format:
-{
-  "items": [
-    {
-      "title": "Service/Product name",
-      "description": "Optional detailed description",
-      "quantity": 1,
-      "unitPrice": 10000,
-      "taxRate": 0
-    }
-  ],
-  "notes": "Optional professional notes for the client",
-  "terms": "Optional payment terms",
-  "taxSuggestion": { "type": "GST", "rate": 18 },
-  "warnings": ["Any concerns about the request"]
-}
-
-Rules:
-1. Parse the user's prompt to extract items, quantities, prices
-2. If prices aren't specified, estimate reasonable market rates for India (in INR)
-3. If user mentions GST or tax, set appropriate taxRate (usually 18% for services in India)
-4. Generate professional notes and terms if the context suggests it
-5. Add warnings if anything seems unclear or needs attention
-6. Keep item titles concise but descriptive
-7. Use proper capitalization for titles
-
-IMPORTANT: Only output valid JSON, no markdown, no code blocks, just raw JSON.`;
+import {
+    processAiInput,
+    validateAiOutput,
+    invoiceItemsOutputSchema,
+    SYSTEM_PROMPTS,
+} from "@/lib/ai-prompt-security";
+import {
+    checkAiGuard,
+    acquireJobSlot,
+    releaseJobSlot,
+    cacheResult,
+    AiBudgetTier,
+} from "@/lib/ai-budget";
+import { prisma } from "@/lib/prisma";
+import { ensureActiveWorkspace } from "@/lib/workspace";
 
 type GenerateRequest = {
     prompt: string;
     clientName?: string;
     projectName?: string;
     currency?: string;
-    context?: any;
 };
 
 export async function POST(request: NextRequest) {
+    const startTime = Date.now();
+    let jobAcquired = false;
+    let workspaceId: string | null = null;
+
     try {
+        // 1. Authentication
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
+        // 2. Get workspace
+        const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+        if (!workspace) {
+            return NextResponse.json({ error: "No active workspace" }, { status: 400 });
+        }
+        workspaceId = workspace.id;  // Store for cleanup
+        const tier = ((session.user as any).tier || "FREE") as AiBudgetTier;
+
+        // 3. Parse request
         const body: GenerateRequest = await request.json();
 
         if (!body.prompt || body.prompt.trim().length < 3) {
-            return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
+            return NextResponse.json({ error: "Prompt is required (min 3 chars)" }, { status: 400 });
         }
 
-        // Build context-aware prompt
-        let userPrompt = body.prompt;
-        if (body.clientName) {
-            userPrompt += `\n\nClient: ${body.clientName}`;
-        }
-        if (body.projectName) {
-            userPrompt += `\nProject: ${body.projectName}`;
-        }
-        if (body.currency) {
-            userPrompt += `\nCurrency: ${body.currency}`;
+        // 4. Process input through security layer
+        // IMPORTANT: Action is ENDPOINT-DEFINED, not user-supplied
+        const securityContext = {
+            workspaceId: workspace.id,
+            userId: session.user.id,
+            action: "extract_invoice_items" as const,  // Endpoint controls this!
+            sourceType: "user_input" as const,
+        };
+
+        const processed = processAiInput(body.prompt, securityContext);
+
+        // 5. Check risk assessment
+        if (processed.riskAssessment.level === "critical") {
+            console.warn("[AI SECURITY] Blocked high-risk prompt", {
+                userId: session.user.id,
+                riskScore: processed.riskAssessment.score,
+                flags: processed.riskAssessment.flags,
+            });
+            return NextResponse.json({
+                error: "Request contains content that cannot be processed. Please describe the invoice items you need.",
+                riskFlags: processed.riskAssessment.flags,
+            }, { status: 400 });
         }
 
-        // Call Gemini
+        // 6. Check budget, concurrency, and cache
+        const guard = await checkAiGuard(
+            workspace.id,
+            processed.contentHash,
+            "extract_invoice_items",
+            tier,
+        );
+
+        // Return cached result if available
+        if (guard.cachedResult) {
+            return NextResponse.json({
+                success: true,
+                cached: true,
+                ...guard.cachedResult as object,
+            });
+        }
+
+        if (!guard.allowed) {
+            return NextResponse.json({
+                error: guard.error,
+                remaining: guard.budgetCheck.remaining,
+                limit: guard.budgetCheck.dailyLimit,
+            }, { status: 429 });
+        }
+
+        // 7. Acquire job slot
+        acquireJobSlot(workspace.id);
+        jobAcquired = true;
+
+        // 8. Build context-aware prompt
+        let userPrompt = processed.sanitizedContent;
+        if (body.clientName) userPrompt += `\n\nClient: ${body.clientName}`;
+        if (body.projectName) userPrompt += `\nProject: ${body.projectName}`;
+        if (body.currency) userPrompt += `\nCurrency: ${body.currency}`;
+
+        // 9. Call Gemini with ENDPOINT-CONTROLLED system prompt
         const response = await generateContentSafe({
             modelName: AI_CONFIG.features.extraction.model,
             fallbackModelName: AI_CONFIG.features.extraction.fallback,
-            systemInstruction: SYSTEM_PROMPT,
+            systemInstruction: SYSTEM_PROMPTS.extract_invoice_items,  // Strict system prompt
             generationConfig: {
-                temperature: 0.3,
+                temperature: 0.2,  // Lower = more deterministic
                 maxOutputTokens: 2048,
             },
             promptParts: [{ text: userPrompt }],
             userId: session.user.id,
-            userTier: (session.user as any).tier || "FREE",
+            userTier: tier === "FREE" ? "FREE" : "PREMIUM",
         });
 
-        // Parse the response
-        let parsed;
-        try {
-            // Clean up response - remove markdown code blocks if present
-            let cleanedResponse = response.trim();
-            if (cleanedResponse.startsWith("```json")) {
-                cleanedResponse = cleanedResponse.slice(7);
-            }
-            if (cleanedResponse.startsWith("```")) {
-                cleanedResponse = cleanedResponse.slice(3);
-            }
-            if (cleanedResponse.endsWith("```")) {
-                cleanedResponse = cleanedResponse.slice(0, -3);
-            }
-            parsed = JSON.parse(cleanedResponse.trim());
-        } catch (parseError) {
-            console.error("Failed to parse AI response:", response);
+        // 10. Validate and parse output through Zod schema
+        // Prevents LLM02 (Insecure Output Handling)
+        let cleanedResponse = response.trim();
+        if (cleanedResponse.startsWith("```json")) cleanedResponse = cleanedResponse.slice(7);
+        if (cleanedResponse.startsWith("```")) cleanedResponse = cleanedResponse.slice(3);
+        if (cleanedResponse.endsWith("```")) cleanedResponse = cleanedResponse.slice(0, -3);
+
+        const validationResult = validateAiOutput(cleanedResponse.trim(), invoiceItemsOutputSchema);
+
+        if (!validationResult.success) {
+            console.error("[AI] Invalid output:", validationResult.error, cleanedResponse);
             return NextResponse.json({
-                error: "AI returned invalid response",
-                raw: response,
+                error: "AI returned invalid data. Please try again.",
             }, { status: 500 });
         }
 
-        // Validate and normalize the response
+        // 11. Build normalized result
         const result = {
-            items: Array.isArray(parsed.items) ? parsed.items.map((item: any) => ({
-                title: item.title || "Service",
+            items: validationResult.data.items.map(item => ({
+                title: item.title,
                 description: item.description || "",
-                quantity: Number(item.quantity) || 1,
-                unitPrice: Number(item.unitPrice) || 0,
-                taxRate: Number(item.taxRate) || 0,
-            })) : [],
-            notes: parsed.notes || null,
-            terms: parsed.terms || null,
-            taxSuggestion: parsed.taxSuggestion || null,
-            warnings: parsed.warnings || [],
+                quantity: item.quantity,
+                unitPrice: item.rate,
+                taxRate: 0,
+            })),
+            notes: validationResult.data.notes || null,
+            confidence: validationResult.data.confidence,
+            warnings: [],
         };
+
+        // 12. Cache the result
+        cacheResult(guard.cacheKey, result, "extract_invoice_items");
+
+        // 13. Audit log
+        await prisma.auditLog.create({
+            data: {
+                userId: session.user.id,
+                workspaceId: workspace.id,
+                action: "AI_INVOICE_GENERATE",
+                resourceType: "INVOICE",
+                metadata: {
+                    promptLength: body.prompt.length,
+                    riskScore: processed.riskAssessment.score,
+                    riskFlags: processed.riskAssessment.flags,
+                    itemsGenerated: result.items.length,
+                    durationMs: Date.now() - startTime,
+                    cached: false,
+                },
+            },
+        });
 
         return NextResponse.json({
             success: true,
+            cached: false,
             ...result,
         });
 
@@ -142,5 +202,11 @@ export async function POST(request: NextRequest) {
             { error: "Failed to generate invoice data" },
             { status: 500 }
         );
+    } finally {
+        // Release job slot on cleanup
+        if (jobAcquired && workspaceId) {
+            releaseJobSlot(workspaceId);
+        }
     }
 }
+
