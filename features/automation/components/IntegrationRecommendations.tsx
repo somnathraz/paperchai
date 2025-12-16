@@ -25,20 +25,63 @@ export const IntegrationRecommendations = memo(function IntegrationRecommendatio
   // If Notion connected, show import panel
   if (notionConnected) {
     return (
-      <div className="border border-stone-200 dark:border-stone-800 rounded-xl p-6 bg-white dark:bg-stone-900/50">
-        <div className="flex items-start gap-4 mb-6">
-          <div className="p-3 bg-green-100 dark:bg-green-900/50 rounded-lg">
-            <Database className="w-6 h-6 text-green-600" />
+      <div className="space-y-4">
+        {/* Notion Import Panel */}
+        <div className="border border-stone-200 dark:border-stone-800 rounded-xl p-6 bg-white dark:bg-stone-900/50">
+          <div className="flex items-start gap-4 mb-6">
+            <div className="p-3 bg-green-100 dark:bg-green-900/50 rounded-lg">
+              <Database className="w-6 h-6 text-green-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-lg mb-1">Notion Connected ✓</h3>
+              <p className="text-sm text-stone-600 dark:text-stone-400 mb-3">
+                Browse your Notion databases and import data into PaperChai
+              </p>
+            </div>
           </div>
-          <div className="flex-1">
-            <h3 className="font-semibold text-lg mb-1">Notion Connected ✓</h3>
-            <p className="text-sm text-stone-600 dark:text-stone-400 mb-3">
-              Browse your Notion databases and import data into PaperChai
-            </p>
-          </div>
+
+          <NotionImportPanel />
         </div>
 
-        <NotionImportPanel />
+        {/* Slack Card - Show if not connected */}
+        {!slackConnected && (
+          <div className="border border-violet-200 dark:border-violet-800 rounded-xl p-6 bg-gradient-to-br from-violet-50 to-purple-50 dark:from-violet-950/20 dark:to-purple-950/20">
+            <div className="flex items-start gap-4 mb-4">
+              <div className="p-3 bg-violet-100 dark:bg-violet-900/50 rounded-lg">
+                <Sparkles className="w-6 h-6 text-violet-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-lg mb-1">Add Slack Integration</h3>
+                <p className="text-sm text-stone-600 dark:text-stone-400">
+                  Connect Slack for commands and notifications
+                </p>
+              </div>
+            </div>
+
+            <div className="border border-stone-200 dark:border-stone-800 rounded-lg p-4 bg-white dark:bg-stone-900/50">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 bg-[#4A154B] rounded">
+                  <MessageSquare className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h4 className="font-medium text-sm">Connect Slack</h4>
+                  <p className="text-xs text-stone-500">Commands & notifications</p>
+                </div>
+              </div>
+              <ul className="text-xs text-stone-600 dark:text-stone-400 space-y-1 mb-3">
+                <li>• Create invoices from threads</li>
+                <li>• Get real-time notifications</li>
+                <li>• Use slash commands</li>
+              </ul>
+              <a
+                href="/api/integrations/slack/oauth/authorize?next=/automation"
+                className="block w-full px-3 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors text-center"
+              >
+                Connect Slack
+              </a>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -77,7 +120,7 @@ export const IntegrationRecommendations = memo(function IntegrationRecommendatio
           <Sparkles className="w-6 h-6 text-violet-600" />
         </div>
         <div className="flex-1">
-          <h3 className="font-semibold text-lg mb-1">Supercharge Your Automation</h3>
+          <h3 className="font-semibold text-lg mb-1">Connect Your Tools</h3>
           <p className="text-sm text-stone-600 dark:text-stone-400">
             Connect Notion and Slack to unlock powerful automation workflows
           </p>
