@@ -2,17 +2,29 @@ import { prisma } from "./prisma";
 import { slugify } from "./slugify";
 
 export async function ensureActiveWorkspace(userId: string, userName?: string | null) {
+  // Fetch user with membership info, but NOT activeWorkspace relation (it's gone)
+  // Instead fetch activeWorkspaceId
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { activeWorkspace: true, memberships: { include: { workspace: true } } },
+    select: {
+      id: true,
+      activeWorkspaceId: true,
+      memberships: { include: { workspace: true } },
+    },
   });
 
   if (!user) return null;
 
-  if (user.activeWorkspace) {
-    return user.activeWorkspace;
+  // 1. Try fetching via activeWorkspaceId
+  if (user.activeWorkspaceId) {
+    const ws = await prisma.workspace.findUnique({
+      where: { id: user.activeWorkspaceId },
+      include: { settings: true },
+    });
+    if (ws) return ws;
   }
 
+  // 2. Fallback to first membership
   const existingMembership = user.memberships[0];
   if (existingMembership) {
     const workspace = existingMembership.workspace;
@@ -23,6 +35,7 @@ export async function ensureActiveWorkspace(userId: string, userName?: string | 
     return workspace;
   }
 
+  // 3. Create Default Workspace
   const workspaceName = userName ? `${userName.split(" ")[0]}'s Workspace` : "My Workspace";
   const slugBase = slugify(workspaceName);
   let slug = slugBase;
@@ -38,11 +51,12 @@ export async function ensureActiveWorkspace(userId: string, userName?: string | 
       ownerId: user.id,
       members: {
         create: {
-          role: "owner",
+          role: "OWNER", // Correct enum case
           userId: user.id,
         },
       },
     },
+    include: { settings: true },
   });
 
   await prisma.user.update({

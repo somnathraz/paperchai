@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import { assertLimit, incrementUsage } from "@/lib/usage";
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -15,6 +16,13 @@ export async function POST(req: Request) {
   const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  }
+
+  // Check Limit
+  try {
+    await assertLimit(workspace.id, session.user.id, "invoices_per_month");
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 402 });
   }
 
   const body = await req.json();
@@ -37,7 +45,10 @@ export async function POST(req: Request) {
   }
 
   const template = templateSlug
-    ? await prisma.invoiceTemplate.findUnique({ where: { slug: templateSlug }, select: { id: true } })
+    ? await prisma.invoiceTemplate.findUnique({
+        where: { slug: templateSlug },
+        select: { id: true },
+      })
     : null;
 
   const invoice = await prisma.invoice.create({
@@ -69,6 +80,9 @@ export async function POST(req: Request) {
     },
     include: { items: true },
   });
+
+  // Track Usage
+  await incrementUsage(workspace.id, "invoices_per_month");
 
   return NextResponse.json({ invoice });
 }

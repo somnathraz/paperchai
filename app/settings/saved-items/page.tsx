@@ -14,7 +14,8 @@ export default async function SavedItemsSettingsPage() {
   const user = await prisma.user.findUnique({
     where: { email: session.user.email },
     include: {
-      settings: true,
+      // settings: true, // Removed
+
       savedItems: {
         orderBy: { usageCount: "desc" },
       },
@@ -45,12 +46,12 @@ export default async function SavedItemsSettingsPage() {
           lastUsedAt: item.lastUsedAt?.toISOString() || null,
         }))}
         initialSettings={{
-          defaultTaxRate: user.settings?.defaultTaxRate ?? 18,
-          taxInclusive: user.settings?.taxInclusive ?? false,
-          defaultCurrency: user.settings?.defaultCurrency ?? "INR",
-          paymentTerms: user.settings?.paymentTerms ?? "Net 30",
-          defaultNotes: user.settings?.defaultNotes ?? null,
-          defaultTerms: user.settings?.defaultTerms ?? null,
+          defaultTaxRate: 18,
+          taxInclusive: false,
+          defaultCurrency: "INR",
+          paymentTerms: "Net 30",
+          defaultNotes: null,
+          defaultTerms: null,
         }}
       />
     </SettingsLayout>

@@ -25,7 +25,11 @@ type EditorHeaderProps = {
   invoiceId?: string;
   templateName: string;
   onSaveDraft: () => void;
-  onSchedule: (opts: { invoiceId?: string; when: string; channel: "email" | "whatsapp" | "both" }) => void;
+  onSchedule: (opts: {
+    invoiceId?: string;
+    when: string;
+    channel: "email" | "whatsapp" | "both";
+  }) => void;
   onSend: (opts: { invoiceId?: string; channel: "email" | "whatsapp" | "both" }) => void;
   onOpenSendModal?: () => void;
   onAIReview?: () => void;
@@ -33,6 +37,8 @@ type EditorHeaderProps = {
   invoiceStatus?: string;
   lastSentAt?: string;
   hasAutomation?: boolean;
+  approvalStatus?: "PENDING" | "APPROVED";
+  onApproveAutomation?: () => void;
 };
 
 export const EditorHeader = memo(function EditorHeader({
@@ -47,6 +53,8 @@ export const EditorHeader = memo(function EditorHeader({
   hasAutomation,
   onAIReview,
   aiReviewIssueCount,
+  approvalStatus,
+  onApproveAutomation,
 }: EditorHeaderProps) {
   const [scheduleDate, setScheduleDate] = useState<Date | undefined>(undefined);
   const [scheduleTime, setScheduleTime] = useState("");
@@ -54,7 +62,8 @@ export const EditorHeader = memo(function EditorHeader({
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const isSentToday = lastSentAt && new Date(lastSentAt).toDateString() === new Date().toDateString();
+  const isSentToday =
+    lastSentAt && new Date(lastSentAt).toDateString() === new Date().toDateString();
 
   const handleDownloadPdf = async () => {
     if (!invoiceId) return;
@@ -75,7 +84,8 @@ export const EditorHeader = memo(function EditorHeader({
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error("PDF download error:", error);
-      alert("Failed to download PDF. Please try again.");
+      // alert("Failed to download PDF. Please try again.");
+      // TODO: Replace with toast notification
     } finally {
       setIsDownloading(false);
     }
@@ -94,16 +104,34 @@ export const EditorHeader = memo(function EditorHeader({
         <div className="h-4 w-px bg-border/60" />
         <span className="text-sm font-medium text-muted-foreground">Template: {templateName}</span>
         {invoiceStatus && (
-          <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${invoiceStatus === "sent" ? "bg-blue-100 text-blue-700" :
-            invoiceStatus === "draft" ? "bg-slate-100 text-slate-700" :
-              "bg-gray-100 text-gray-700"
-            }`}>
+          <span
+            className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${
+              invoiceStatus === "sent"
+                ? "bg-blue-100 text-blue-700"
+                : invoiceStatus === "draft"
+                  ? "bg-slate-100 text-slate-700"
+                  : "bg-gray-100 text-gray-700"
+            }`}
+          >
             {invoiceStatus}
+          </span>
+        )}
+        {approvalStatus === "PENDING" && (
+          <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+            Approval required
           </span>
         )}
       </div>
 
       <div className="flex items-center gap-2">
+        {approvalStatus === "PENDING" && onApproveAutomation && (
+          <button
+            onClick={onApproveAutomation}
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition hover:border-amber-300 hover:bg-amber-100"
+          >
+            Approve automation
+          </button>
+        )}
         <button
           onClick={handleDownloadPdf}
           disabled={isDownloading || !invoiceId}
@@ -142,11 +170,20 @@ export const EditorHeader = memo(function EditorHeader({
           Schedule
         </button>
         <button
-          onClick={() => onOpenSendModal ? onOpenSendModal() : onSend({ channel })}
-          className={`inline-flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] transition hover:shadow-[0_6px_16px_rgba(16,185,129,0.4)] ${isSentToday ? "bg-slate-400 cursor-not-allowed shadow-none" : "bg-gradient-to-r from-primary via-emerald-500 to-primary"
-            }`}
+          onClick={() => (onOpenSendModal ? onOpenSendModal() : onSend({ channel }))}
+          className={`inline-flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] transition hover:shadow-[0_6px_16px_rgba(16,185,129,0.4)] ${
+            isSentToday
+              ? "bg-slate-400 cursor-not-allowed shadow-none"
+              : "bg-gradient-to-r from-primary via-emerald-500 to-primary"
+          }`}
           disabled={!!isSentToday}
-          title={isSentToday ? "Invoice already sent today" : hasAutomation ? "Automation configured" : "Send immediately"}
+          title={
+            isSentToday
+              ? "Invoice already sent today"
+              : hasAutomation
+                ? "Automation configured"
+                : "Send immediately"
+          }
         >
           {isSentToday ? (
             <>
@@ -172,15 +209,16 @@ export const EditorHeader = memo(function EditorHeader({
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>Schedule Invoice</DialogTitle>
-            <DialogDescription>
-              Choose when and how to send this invoice.
-            </DialogDescription>
+            <DialogDescription>Choose when and how to send this invoice.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Delivery Channel</label>
-              <Select value={channel} onValueChange={(v: "email" | "whatsapp" | "both") => setChannel(v)}>
+              <Select
+                value={channel}
+                onValueChange={(v: "email" | "whatsapp" | "both") => setChannel(v)}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -206,7 +244,9 @@ export const EditorHeader = memo(function EditorHeader({
               <Input
                 type="time"
                 value={scheduleTime}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setScheduleTime(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setScheduleTime(e.target.value)
+                }
                 placeholder="Select time"
               />
             </div>

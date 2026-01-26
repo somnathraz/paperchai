@@ -19,6 +19,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning className="overflow-x-hidden">
       <body
+        suppressHydrationWarning
         className={`${grotesk.className} antialiased bg-background text-foreground w-full max-w-full overflow-x-hidden`}
       >
         <Providers>{children}</Providers>

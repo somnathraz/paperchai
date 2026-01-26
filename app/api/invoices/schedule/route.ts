@@ -20,13 +20,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invoiceId and scheduledSendAt required" }, { status: 400 });
   }
 
+  const existingInvoice = await prisma.invoice.findUnique({
+    where: { id: invoiceId },
+    select: { sendMeta: true },
+  });
+  const existingSendMeta = (existingInvoice?.sendMeta as Record<string, any>) || {};
+  const mergedSendMeta = {
+    ...existingSendMeta,
+    templateSlug,
+    reminderCadence,
+  };
+
   const invoice = await prisma.invoice.update({
     where: { id: invoiceId, workspaceId: workspace.id },
     data: {
       status: "scheduled",
       scheduledSendAt: new Date(scheduledSendAt),
       deliveryChannel: channel,
-      sendMeta: { templateSlug, reminderCadence },
+      sendMeta: mergedSendMeta,
     },
   });
 

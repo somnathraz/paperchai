@@ -14,7 +14,7 @@ export default async function MembersSettingsPage() {
   const workspace = await prisma.workspace.findUnique({
     where: { id: session.user.workspaceId },
     include: {
-      members: { include: { user: true }, orderBy: { createdAt: "asc" } },
+      members: { include: { user: true }, orderBy: { joinedAt: "asc" } },
       invites: { orderBy: { createdAt: "desc" } },
     },
   });
@@ -29,7 +29,9 @@ export default async function MembersSettingsPage() {
     email: member.user.email,
     role: member.role,
     status: "active",
-    lastActive: new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(member.user.updatedAt || new Date()),
+    lastActive: new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(
+      member.user.updatedAt || new Date()
+    ),
     twoFactor: Boolean(member.user.emailVerified),
     isOwner: member.userId === workspace.ownerId,
   }));
@@ -43,7 +45,11 @@ export default async function MembersSettingsPage() {
   }));
 
   return (
-    <SettingsLayout current="/settings/members" title="Workspace members" description="Invite teammates, assign permissions, and transfer workspace control.">
+    <SettingsLayout
+      current="/settings/members"
+      title="Workspace members"
+      description="Invite teammates, assign permissions, and transfer workspace control."
+    >
       <WorkspaceMembersPanel
         members={members}
         invites={invites}

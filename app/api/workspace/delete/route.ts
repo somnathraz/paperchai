@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { ensureActiveWorkspace } from "@/lib/workspace";
 import { cookies } from "next/headers";
 
 export async function DELETE(req: Request) {
@@ -15,17 +16,19 @@ export async function DELETE(req: Request) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      include: { activeWorkspace: true },
     });
 
-    if (!user || !user.activeWorkspace) {
-      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+
+    if (!user || !workspace) {
+      return NextResponse.json({ error: "Workspace or User not found" }, { status: 404 });
     }
 
-    const workspace = user.activeWorkspace;
-
     // Check if user is workspace owner
-    if (workspace.ownerId !== user.id) {
+    // Note: workspace ownerId might be null in schema but logically exists. Or check legacyOwnerWorkspaces?
+    // Assuming ownerId is populated or backfilled.
+    // If not, check other source? Strict check for now.
+    if (workspace.ownerId !== session.user.id) {
       return NextResponse.json(
         { error: "Only workspace owner can delete workspace" },
         { status: 403 }

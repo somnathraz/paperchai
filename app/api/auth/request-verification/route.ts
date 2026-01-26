@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     await prisma.verificationToken.create({
       data: {
         identifier: normalizedEmail,
-        tokenHash,
+        token: tokenHash,
         expires,
       },
     });

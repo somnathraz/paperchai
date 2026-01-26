@@ -1,46 +1,53 @@
-# paperchai
+# PaperChai: The "Anti-Accounting" Invoice Tool for Freelancers
 
-A Next.js application with shadcn/ui components.
+[🔴 Live Demo](https://paperchai.com) | [📄 View Portfolio](https://www.somanathkhadanga.com/)
 
-## Getting Started
+![Project Demo Gif](./public/demo.gif)
 
-First, install the dependencies:
+## 🧐 The Problem
 
-```bash
-npm install
-```
+Existing freelance invoicing tools are bloated. They are built for accountants, requiring complex setups for inventory and taxes that freelance developers don't need. Sending a simple invoice took 15 clicks, and chasing payments was socially awkward.
 
-Then, run the development server:
+## 💡 The Solution
 
-```bash
-npm run dev
-```
+PaperChai is an "Anti-Accounting" tool designed for speed. It focuses purely on cash flow: generating an invoice from a Notion doc in seconds and using AI to handle payment follow-ups without the awkwardness.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 🏗️ Architecture / System Design
 
-## Adding shadcn/ui Components
+- **Frontend:** Next.js (App Router) with Tailwind CSS & shadcn/ui for a snappy, accessible client-side experience.
+- **Backend:** Next.js API Routes handling business logic and secure database interactions.
+- **Database:** PostgreSQL (via Prisma ORM) for flexible relationship management (client profiles, invoice history).
+- **AI Integration:** Google Gemini & OpenAI for intelligence layers, such as drafting email follow-ups and parsing unstructured invoice data.
+- **Automation:** structured automation workflows for recurring tasks.
 
-To add shadcn/ui components, use the CLI:
+## 🛠️ Tech Stack
 
-```bash
-npx shadcn@latest add [component-name]
-```
+| Component            | Technology                             |
+| :------------------- | :------------------------------------- |
+| **Core**             | Next.js 14, React, Node.js, Prisma     |
+| **State Management** | Redux Toolkit                          |
+| **Styling**          | Tailwind CSS, shadcn/ui, Framer Motion |
+| **Auth**             | NextAuth.js                            |
+| **AI/ML**            | Google Gemini, OpenAI API              |
+| **Testing/Tools**    | Puppeteer, Jest                        |
 
-For example:
-```bash
-npx shadcn@latest add button
-npx shadcn@latest add card
-```
+## 🧠 Challenges & Learnings
 
-## Project Structure
+**Challenge 1: Ensuring Reliable AI Data Extraction**
 
-- `app/` - Next.js app directory with pages and layouts
-- `components/` - React components
-- `components/ui/` - shadcn/ui components (will be added here)
-- `lib/` - Utility functions
-- `public/` - Static assets
+> _The Problem:_ LLMs can occasionally "hallucinate" or format data inconsistently when extracting invoice details from free-text Notion documents.
+> _How I Solved It:_ I implemented a strict Zod schema validation layer that acts as a gateway for the AI output. This ensures that any data entering the system adheres to the expected format, with a fallback retry mechanism for malformed responses.
 
-## Learn More
+**Trade-off Decision:**
 
-- [Next.js Documentation](https://nextjs.org/docs)
-- [shadcn/ui Documentation](https://ui.shadcn.com)
+> "I chose **NextAuth.js** for authentication over building a custom JWT system. While a custom solution enables fine-grained control, NextAuth.js provided battle-tested security and built-in OAuth providers immediately. This trade-off saved approximately 20 hours of development time, allowing me to focus on the core 'Anti-Accounting' features."
+
+---
+
+### 📬 Author
+
+Built by **Somnath Khadanga**.
+
+I specialize in building full-stack applications and integrating AI into business workflows.
+
+[👉 Visit my Full Portfolio](https://www.somanathkhadanga.com/) | [Connect on LinkedIn](https://www.linkedin.com/in/somnath-khadanga/)
