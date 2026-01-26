@@ -218,7 +218,8 @@ export async function getPage(accessToken: string, pageId: string): Promise<any>
 export async function getPageBlocks(
   accessToken: string,
   pageId: string,
-  startCursor?: string
+  startCursor?: string,
+  fetchChildrenDepth: number = 2 // Fetch nested children up to this depth
 ): Promise<{
   results?: Array<any>;
   has_more?: boolean;
@@ -235,11 +236,36 @@ export async function getPageBlocks(
     },
   });
 
-  return response.json();
+  const data = await response.json();
+
+  // Recursively fetch children for ALL blocks that have them
+  // This ensures we capture nested text regardless of format (lists, callouts, quotes, columns, etc.)
+  if (data.results && fetchChildrenDepth > 0) {
+    for (const block of data.results) {
+      // Fetch children for ANY block that has nested content
+      if (block.has_children) {
+        try {
+          const childrenResponse = await getPageBlocks(
+            accessToken,
+            block.id,
+            undefined,
+            fetchChildrenDepth - 1
+          );
+          if (childrenResponse.results && block[block.type]) {
+            block[block.type].children = childrenResponse.results;
+          }
+        } catch (err) {
+          console.error(`[Notion] Failed to fetch children for ${block.type}:`, err);
+        }
+      }
+    }
+  }
+
+  return data;
 }
 
 /**
- * Extract plain text from Notion blocks
+ * Extract plain text from Notion blocks with structure preservation
  */
 export function extractTextFromBlocks(blocks: any[]): string {
   const textParts: string[] = [];
@@ -250,21 +276,101 @@ export function extractTextFromBlocks(blocks: any[]): string {
 
     if (!content) continue;
 
-    // Extract rich text content
-    if (content.rich_text) {
+    // Handle headings with proper formatting
+    if (type === "heading_1" || type === "heading_2" || type === "heading_3") {
+      const text =
+        content.rich_text?.map((rt: any) => rt.plain_text).join("") ||
+        content.title?.map((rt: any) => rt.plain_text).join("") ||
+        "";
+      if (text) {
+        const prefix = type === "heading_1" ? "# " : type === "heading_2" ? "## " : "### ";
+        textParts.push(prefix + text);
+      }
+    }
+    // Handle bulleted and numbered lists
+    else if (type === "bulleted_list_item" || type === "numbered_list_item") {
+      const text = content.rich_text?.map((rt: any) => rt.plain_text).join("") || "";
+      if (text) {
+        const prefix = type === "numbered_list_item" ? "1. " : "- ";
+        textParts.push(prefix + text);
+
+        // CRITICAL: Extract nested list items (e.g., client details under "1. Client")
+        if (content.children && content.children.length > 0) {
+          const childText = extractTextFromBlocks(content.children);
+          if (childText) {
+            // Indent child items with spaces to show nesting
+            const indentedChildren = childText
+              .split("\n")
+              .map((line) => (line.trim() ? "   " + line : line)) // Indent non-empty lines
+              .join("\n");
+            textParts.push(indentedChildren);
+          }
+        }
+      }
+    }
+    // Extract rich text content (for paragraphs, etc.)
+    else if (content.rich_text) {
       const text = content.rich_text.map((rt: any) => rt.plain_text).join("");
       if (text) textParts.push(text);
     }
-
-    // Extract title (for headings, etc.)
-    if (content.title) {
+    // Extract title (for other block types)
+    else if (content.title) {
       const text = content.title.map((rt: any) => rt.plain_text).join("");
       if (text) textParts.push(text);
     }
 
-    // Handle nested children
-    if (content.children) {
-      textParts.push(extractTextFromBlocks(content.children));
+    // Handle table blocks - extract all cell content
+    if (type === "table") {
+      textParts.push("\n[TABLE]");
+      if (content.children) {
+        textParts.push(extractTextFromBlocks(content.children));
+      }
+      textParts.push("[/TABLE]\n");
+    }
+
+    // Handle table_row blocks - extract cells as pipe-separated values
+    if (type === "table_row" && content.cells) {
+      const rowCells = content.cells.map((cell: any[]) =>
+        cell.map((rt: any) => rt.plain_text).join("")
+      );
+      textParts.push("| " + rowCells.join(" | ") + " |");
+    }
+
+    // Handle callout blocks (often used for important info)
+    if (type === "callout") {
+      const text = content.rich_text?.map((rt: any) => rt.plain_text).join("") || "";
+      if (text) {
+        textParts.push(`[IMPORTANT] ${text}`);
+      }
+    }
+
+    // Handle toggle blocks (collapsible sections)
+    if (type === "toggle") {
+      const text = content.rich_text?.map((rt: any) => rt.plain_text).join("") || "";
+      if (text) {
+        textParts.push(`> ${text}`);
+      }
+    }
+
+    // Universal fallback: Handle nested children for ANY block type not explicitly handled above
+    // This ensures we never miss nested text content regardless of block type
+    if (
+      content.children &&
+      ![
+        "table", // Already handled above
+        "numbered_list_item", // Already handled above
+        "bulleted_list_item", // Already handled above
+      ].includes(type)
+    ) {
+      const childText = extractTextFromBlocks(content.children);
+      if (childText) {
+        // Indent to show nesting for quote, callout, column, synced_block, etc.
+        const indented = childText
+          .split("\n")
+          .map((line) => (line.trim() ? "  " + line : line))
+          .join("\n");
+        textParts.push(indented);
+      }
     }
   }
 

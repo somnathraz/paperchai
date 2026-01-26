@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Check if user exists
     const existing = await prisma.user.findUnique({
-      where: { email: normalizedEmail }
+      where: { email: normalizedEmail },
     });
     if (existing) {
       // Audit: Failed signup attempt
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
     await prisma.verificationToken.create({
       data: {
         identifier: normalizedEmail,
-        tokenHash,
+        token: tokenHash,
         expires,
       },
     });
@@ -108,4 +108,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
   }
 }
-

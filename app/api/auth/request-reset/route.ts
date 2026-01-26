@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     await prisma.passwordResetToken.create({
       data: {
         identifier: normalizedEmail,
-        tokenHash,
+        token: tokenHash,
         expires,
       },
     });
@@ -83,4 +83,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
   }
 }
-

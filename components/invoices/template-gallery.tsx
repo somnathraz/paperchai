@@ -1,13 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { Palette, Zap, Sparkles, ShieldCheck, Play, Sparkle, Flame, Star, Search } from "lucide-react";
+import {
+  Palette,
+  Zap,
+  Sparkles,
+  ShieldCheck,
+  Play,
+  Sparkle,
+  Flame,
+  Star,
+  Search,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { TemplatePreviewModal } from "./template-preview-modal";
 import { renderTemplate } from "./templates/registry";
 
 type TemplateGalleryProps = {
   firstName: string;
+  variant?: "full" | "embedded";
   templates: {
     slug: string;
     name: string;
@@ -25,11 +36,14 @@ const METRICS = [
   { label: "Reliability powered", value: "Yes", icon: ShieldCheck },
 ];
 
-export function TemplateGallery({ firstName, templates }: TemplateGalleryProps) {
+export function TemplateGallery({ firstName, templates, variant = "full" }: TemplateGalleryProps) {
   const [filter, setFilter] = useState<string>("All");
-  const [previewTemplate, setPreviewTemplate] = useState<TemplateGalleryProps["templates"][number] | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<
+    TemplateGalleryProps["templates"][number] | null
+  >(null);
   const [sort, setSort] = useState<"default" | "pro" | "az">("default");
   const [query, setQuery] = useState("");
+  const isEmbedded = variant === "embedded";
 
   const filtered = useMemo(() => {
     let results = templates;
@@ -85,7 +99,10 @@ export function TemplateGallery({ firstName, templates }: TemplateGalleryProps) 
 
     return (
       <div className="mt-4 h-[180px] overflow-hidden rounded-lg bg-neutral-100">
-        <div className="h-full scale-[0.22] origin-top-left" style={{ width: '454%', height: '454%' }}>
+        <div
+          className="h-full scale-[0.22] origin-top-left"
+          style={{ width: "454%", height: "454%" }}
+        >
           {renderTemplate(template.slug, {
             preview: true,
             modalPreview: true,
@@ -97,14 +114,19 @@ export function TemplateGallery({ firstName, templates }: TemplateGalleryProps) 
   };
 
   return (
-    <div className="min-h-screen mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 pt-4 pb-8 space-y-8">
+    <div
+      className={`${isEmbedded ? "" : "min-h-screen "}mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 pt-4 pb-8 space-y-8`}
+    >
       {/* 2️⃣ header section */}
       <section className="mb-4 sm:mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Invoices</p>
-          <h1 className="text-2xl sm:text-3xl font-bold leading-tight">Pick a template and billing, {firstName}.</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold leading-tight">
+            Pick a template and billing, {firstName}.
+          </h1>
           <p className="text-sm text-muted-foreground max-w-2xl">
-            Choose a layout, preview instantly, then jump into the editor. PaperChai wires reminders, WhatsApp nudges, and payment links out of the box.
+            Choose a layout, preview instantly, then jump into the editor. PaperChai wires
+            reminders, WhatsApp nudges, and payment links out of the box.
           </p>
         </div>
       </section>
@@ -112,7 +134,10 @@ export function TemplateGallery({ firstName, templates }: TemplateGalleryProps) 
       {/* Metrics Row - 2 cols mobile, 4 cols desktop */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {METRICS.map((metric) => (
-          <div key={metric.label} className="rounded-2xl border border-white/30 bg-white/90 p-4 shadow-[0_20px_80px_-60px_rgba(15,23,42,0.45)]">
+          <div
+            key={metric.label}
+            className="rounded-2xl border border-white/30 bg-white/90 p-4 shadow-[0_20px_80px_-60px_rgba(15,23,42,0.45)]"
+          >
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               <metric.icon className="h-4 w-4 text-primary" />
               {metric.label}
@@ -144,10 +169,11 @@ export function TemplateGallery({ firstName, templates }: TemplateGalleryProps) 
                   e.stopPropagation();
                   setFilter(tab.label);
                 }}
-                className={`inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs font-semibold whitespace-nowrap transition cursor-pointer ${filter === tab.label
-                  ? "border-primary/50 bg-primary/10 text-foreground"
-                  : "border-border/70 text-muted-foreground hover:border-primary/30"
-                  }`}
+                className={`inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                  filter === tab.label
+                    ? "border-primary/50 bg-primary/10 text-foreground"
+                    : "border-border/70 text-muted-foreground hover:border-primary/30"
+                }`}
               >
                 <tab.icon className="h-3.5 w-3.5" />
                 {tab.label}
@@ -199,20 +225,29 @@ export function TemplateGallery({ firstName, templates }: TemplateGalleryProps) 
             return (
               <article
                 key={template.slug}
-                className={`group relative flex flex-col justify-between rounded-2xl border ${template.isPro ? "border-amber-200/80" : "border-border/60"
-                  } bg-white p-4 shadow-sm transition-all ${isAvailable ? "hover:-translate-y-1 hover:shadow-md" : "opacity-75"
-                  }`}
+                className={`group relative flex flex-col justify-between rounded-2xl border ${
+                  template.isPro ? "border-amber-200/80" : "border-border/60"
+                } bg-white p-4 shadow-sm transition-all ${
+                  isAvailable ? "hover:-translate-y-1 hover:shadow-md" : "opacity-75"
+                }`}
               >
                 <div className="space-y-4">
                   {/* Header: Name + Badge */}
                   <div className="flex items-center justify-between relative z-10">
                     <div>
                       <p className="text-sm font-semibold text-foreground">{template.name}</p>
-                      {tagBadge && <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{tagBadge}</p>}
+                      {tagBadge && (
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          {tagBadge}
+                        </p>
+                      )}
                     </div>
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${tag === "Pro" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"
-                        }`}
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        tag === "Pro"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-emerald-100 text-emerald-700"
+                      }`}
                     >
                       {tag}
                     </span>
@@ -261,7 +296,15 @@ export function TemplateGallery({ firstName, templates }: TemplateGalleryProps) 
         {sorted.length === 0 && (
           <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-muted/40 p-10 text-sm text-muted-foreground text-center">
             <p>No templates found for &ldquo;{query || filter}&rdquo;.</p>
-            <button onClick={() => { setFilter("All"); setQuery(""); }} className="mt-2 text-primary underline">Clear filters</button>
+            <button
+              onClick={() => {
+                setFilter("All");
+                setQuery("");
+              }}
+              className="mt-2 text-primary underline"
+            >
+              Clear filters
+            </button>
           </div>
         )}
       </section>
@@ -271,12 +314,19 @@ export function TemplateGallery({ firstName, templates }: TemplateGalleryProps) 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <p className="text-xs uppercase tracking-wider text-primary font-semibold">Marketplace</p>
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">Soon</span>
+              <p className="text-xs uppercase tracking-wider text-primary font-semibold">
+                Marketplace
+              </p>
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+                Soon
+              </span>
             </div>
-            <h3 className="text-lg sm:text-xl font-semibold text-foreground">Community & Designer Templates</h3>
+            <h3 className="text-lg sm:text-xl font-semibold text-foreground">
+              Community & Designer Templates
+            </h3>
             <p className="text-sm text-muted-foreground max-w-xl">
-              Get access to thousands of community-made invoices, AI themes, and direct imports from Canva/Figma.
+              Get access to thousands of community-made invoices, AI themes, and direct imports from
+              Canva/Figma.
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto">
@@ -291,13 +341,15 @@ export function TemplateGallery({ firstName, templates }: TemplateGalleryProps) 
       </section>
 
       {/* Quick action FAB - Mobile only optional or keep fixed */}
-      <Link
-        href="/invoices/new"
-        className="fixed bottom-6 right-6 z-30 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-white shadow-lg shadow-primary/30 transition hover:scale-105 active:scale-95 sm:hidden"
-      >
-        <Zap className="h-4 w-4 fill-white" />
-        <span className="font-semibold">New</span>
-      </Link>
+      {!isEmbedded && (
+        <Link
+          href="/invoices/new"
+          className="fixed bottom-6 right-6 z-30 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-white shadow-lg shadow-primary/30 transition hover:scale-105 active:scale-95 sm:hidden"
+        >
+          <Zap className="h-4 w-4 fill-white" />
+          <span className="font-semibold">New</span>
+        </Link>
+      )}
 
       {previewTemplate && (
         <TemplatePreviewModal template={previewTemplate} onClose={() => setPreviewTemplate(null)} />

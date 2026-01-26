@@ -5,7 +5,12 @@ import { cn } from "@/lib/utils";
 import { GripVertical, Plus } from "lucide-react";
 import { InvoiceSection } from "./modern-editor/types";
 
-type ClientOption = { id: string; name: string; email?: string | null; reliabilityScore?: number | null };
+type ClientOption = {
+  id: string;
+  name: string;
+  email?: string | null;
+  reliabilityScore?: number | null;
+};
 type ProjectOption = { id: string; name: string; clientId?: string | null };
 
 export type InvoiceItemInput = {
@@ -85,11 +90,19 @@ export type InvoiceFormState = {
     }[];
   };
 
+  automationApproval?: {
+    status: "PENDING" | "APPROVED";
+    requestedAt?: string;
+    approvedAt?: string;
+    scheduledSendAt?: string;
+    ruleId?: string;
+  };
+
   // Tax configuration
   taxSettings?: {
-    inclusive: boolean;        // Prices include tax
-    automatic: boolean;        // Auto-detect tax from client location
-    defaultRate?: number;      // Default tax rate when automatic is enabled
+    inclusive: boolean; // Prices include tax
+    automatic: boolean; // Auto-detect tax from client location
+    defaultRate?: number; // Default tax rate when automatic is enabled
   };
 };
 
@@ -149,7 +162,9 @@ export function InvoiceForm({ data, onChange, clients, projects }: InvoiceFormPr
                   </option>
                 ))}
               </select>
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">▾</span>
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                ▾
+              </span>
             </div>
           </label>
           <label className="text-sm font-semibold text-foreground">
@@ -167,7 +182,9 @@ export function InvoiceForm({ data, onChange, clients, projects }: InvoiceFormPr
                   </option>
                 ))}
               </select>
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">▾</span>
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                ▾
+              </span>
             </div>
           </label>
         </div>
@@ -290,7 +307,10 @@ export function InvoiceForm({ data, onChange, clients, projects }: InvoiceFormPr
             {data.items.map((item, idx) => {
               const lineTotal = (item.quantity || 0) * (item.unitPrice || 0);
               return (
-                <div key={idx} className="grid grid-cols-[40px_2fr_repeat(3,1fr)] items-center gap-2 px-3 py-2 hover:bg-slate-50">
+                <div
+                  key={idx}
+                  className="grid grid-cols-[40px_2fr_repeat(3,1fr)] items-center gap-2 px-3 py-2 hover:bg-slate-50"
+                >
                   <span className="flex justify-center text-slate-400">
                     <GripVertical className="h-4 w-4" />
                   </span>
@@ -312,7 +332,9 @@ export function InvoiceForm({ data, onChange, clients, projects }: InvoiceFormPr
                     value={item.unitPrice}
                     onChange={(e) => updateItem(idx, { unitPrice: Number(e.target.value) || 0 })}
                   />
-                  <span className="text-right text-sm font-semibold text-foreground">₹{lineTotal.toLocaleString()}</span>
+                  <span className="text-right text-sm font-semibold text-foreground">
+                    ₹{lineTotal.toLocaleString()}
+                  </span>
                 </div>
               );
             })}

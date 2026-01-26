@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   CalendarClock,
   FileText,
@@ -29,12 +29,7 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -70,7 +65,12 @@ const timelineMock = [
   { label: "Soft reminder sent", time: "2h ago", icon: Mail, color: "text-primary" },
   { label: "WhatsApp delivered", time: "3h ago", icon: Receipt, color: "text-emerald-600" },
   { label: "Invoice FMCC-108 viewed", time: "1d ago", icon: FileText, color: "text-slate-600" },
-  { label: "Reliability score updated +4", time: "1d ago", icon: ShieldCheck, color: "text-amber-600" },
+  {
+    label: "Reliability score updated +4",
+    time: "1d ago",
+    icon: ShieldCheck,
+    color: "text-amber-600",
+  },
 ];
 
 export function ClientDetailDrawer({
@@ -85,6 +85,32 @@ export function ClientDetailDrawer({
   const [creationMode, setCreationMode] = useState<"manual" | "ai">("manual");
   const [showNewProject, setShowNewProject] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [fullClient, setFullClient] = useState<any>(null);
+  const [fetchingDetails, setFetchingDetails] = useState(false);
+
+  // Fetch full client details when drawer opens
+  useEffect(() => {
+    if (open && client?.id && !fullClient) {
+      setFetchingDetails(true);
+      fetch(`/api/clients/${displayClient.id}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.client) {
+            setFullClient(data.client);
+          }
+        })
+        .catch((err) => console.error("Failed to fetch client details:", err))
+        .finally(() => setFetchingDetails(false));
+    }
+
+    // Reset when drawer closes
+    if (!open) {
+      setFullClient(null);
+    }
+  }, [open, client?.id]);
+
+  // Use full client data if available, otherwise use the partial client from props
+  const displayClient = fullClient || client;
 
   // Handlers
   const handleNewProject = () => {
@@ -106,9 +132,10 @@ export function ClientDetailDrawer({
   const handleProjectCreated = async () => {
     setShowNewProject(false);
     setRefreshing(true);
-    // Refresh the page
+    // Refresh the client data
+    setFullClient(null); // Force refetch
     setTimeout(() => {
-      window.location.reload();
+      setRefreshing(false);
     }, 500);
   };
 
@@ -130,28 +157,20 @@ export function ClientDetailDrawer({
     ];
   }, [client]);
 
-  if (!client && !loading) return null;
+  if (!displayClient && !loading) return null;
 
   const getReliabilityBadge = (score: number) => {
     if (score >= 80) {
       return (
-        <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-          Reliable
-        </Badge>
+        <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Reliable</Badge>
       );
     }
     if (score >= 60) {
       return (
-        <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">
-          Sometimes Late
-        </Badge>
+        <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">Sometimes Late</Badge>
       );
     }
-    return (
-      <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100">
-        High Risk
-      </Badge>
-    );
+    return <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100">High Risk</Badge>;
   };
 
   return (
@@ -167,16 +186,16 @@ export function ClientDetailDrawer({
             <div className="flex items-start justify-between">
               <div>
                 <SheetTitle className="text-2xl font-bold text-slate-900">
-                  {client.name}
+                  {displayClient.name}
                 </SheetTitle>
                 <SheetDescription className="mt-1">
-                  {client.email || "No email"} • {client.company || "No company"}
+                  {displayClient.email || "No email"} • {displayClient.company || "No company"}
                 </SheetDescription>
               </div>
               <div className="flex items-center gap-2">
-                {getReliabilityBadge(client.reliabilityScore ?? 0)}
+                {getReliabilityBadge(displayClient.reliabilityScore ?? 0)}
                 <span className="text-lg font-semibold text-slate-900">
-                  {client.reliabilityScore ?? 0}
+                  {displayClient.reliabilityScore ?? 0}
                 </span>
               </div>
             </div>
@@ -220,12 +239,8 @@ export function ClientDetailDrawer({
                   key={m.label}
                   className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
                 >
-                  <p className="text-xs uppercase tracking-wider text-slate-500">
-                    {m.label}
-                  </p>
-                  <p className="mt-1 text-lg font-semibold text-slate-900">
-                    {m.value}
-                  </p>
+                  <p className="text-xs uppercase tracking-wider text-slate-500">{m.label}</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-900">{m.value}</p>
                   <p className="text-xs text-slate-500">{m.sub}</p>
                 </div>
               ))}
@@ -281,7 +296,7 @@ export function ClientDetailDrawer({
                       </TableHeader>
                       <TableBody>
                         {client?.projects?.length > 0 ? (
-                          client.projects.map((project: any) => (
+                          displayClient.projects.map((project: any) => (
                             <TableRow key={project.id}>
                               <TableCell>
                                 <div>
@@ -325,13 +340,16 @@ export function ClientDetailDrawer({
                                           : `₹${Number(project.rateValue || 0).toLocaleString()}`}
                                   </p>
                                   <p className="text-xs text-slate-500">
-                                    {project.billingStrategy === "PER_MILESTONE" ? "Milestone-based" : project.type}
+                                    {project.billingStrategy === "PER_MILESTONE"
+                                      ? "Milestone-based"
+                                      : project.type}
                                   </p>
                                 </div>
                               </TableCell>
                               <TableCell>
                                 <span className="text-sm text-slate-600">
-                                  {project._count?.invoices || 0} {project._count?.invoices === 1 ? 'invoice' : 'invoices'}
+                                  {project._count?.invoices || 0}{" "}
+                                  {project._count?.invoices === 1 ? "invoice" : "invoices"}
                                 </span>
                               </TableCell>
                               <TableCell>
@@ -348,7 +366,8 @@ export function ClientDetailDrawer({
                                   )}
                                   {project.endDate && (
                                     <p className="text-slate-400">
-                                      → {new Date(project.endDate).toLocaleDateString("en-IN", {
+                                      →{" "}
+                                      {new Date(project.endDate).toLocaleDateString("en-IN", {
                                         day: "numeric",
                                         month: "short",
                                       })}
@@ -397,7 +416,7 @@ export function ClientDetailDrawer({
                       </TableHeader>
                       <TableBody>
                         {client?.invoices?.length > 0 ? (
-                          client.invoices.map((inv: any) => (
+                          displayClient.invoices.map((inv: any) => (
                             <TableRow
                               key={inv.id}
                               className="cursor-pointer hover:bg-slate-50 transition-colors"
@@ -406,9 +425,7 @@ export function ClientDetailDrawer({
                               <TableCell className="font-medium text-blue-600 hover:text-blue-800">
                                 {inv.number || inv.id}
                               </TableCell>
-                              <TableCell>
-                                ₹{Number(inv.total || 0).toLocaleString()}
-                              </TableCell>
+                              <TableCell>₹{Number(inv.total || 0).toLocaleString()}</TableCell>
                               <TableCell>
                                 <Badge
                                   variant={
@@ -428,9 +445,7 @@ export function ClientDetailDrawer({
                                 </Badge>
                               </TableCell>
                               <TableCell>
-                                {inv.dueDate
-                                  ? new Date(inv.dueDate).toLocaleDateString()
-                                  : "—"}
+                                {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : "—"}
                               </TableCell>
                             </TableRow>
                           ))
@@ -460,7 +475,12 @@ export function ClientDetailDrawer({
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center justify-between mb-4">
                     <p className="text-sm font-semibold text-slate-900">Agreements & Briefs</p>
-                    <Button variant="outline" size="sm" className="rounded-full" onClick={handleUploadDocument}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-full"
+                      onClick={handleUploadDocument}
+                    >
                       <Upload className="h-4 w-4 mr-2" />
                       Upload New
                     </Button>
@@ -477,12 +497,15 @@ export function ClientDetailDrawer({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {client.documents.map((doc: any) => (
+                        {displayClient.documents.map((doc: any) => (
                           <TableRow key={doc.id}>
                             <TableCell className="font-medium">
                               <div className="flex items-center gap-2">
                                 <FileText className="h-4 w-4 text-blue-500" />
-                                <span className="truncate max-w-[180px]" title={doc.name || "Untitled"}>
+                                <span
+                                  className="truncate max-w-[180px]"
+                                  title={doc.name || "Untitled"}
+                                >
                                   {doc.name || "Untitled Document"}
                                 </span>
                               </div>
@@ -510,7 +533,11 @@ export function ClientDetailDrawer({
                     <div className="flex flex-col items-center justify-center py-8 text-center text-slate-500 border-2 border-dashed border-slate-100 rounded-lg">
                       <FileText className="h-8 w-8 mb-2 opacity-50" />
                       <p>No agreements uploaded yet.</p>
-                      <Button variant="link" onClick={handleUploadDocument} className="text-blue-600">
+                      <Button
+                        variant="link"
+                        onClick={handleUploadDocument}
+                        className="text-blue-600"
+                      >
                         Upload your first agreement
                       </Button>
                     </div>
@@ -529,20 +556,25 @@ export function ClientDetailDrawer({
                       </Button>
                     </div>
                     <p className="text-sm text-slate-600">
-                      {client.notes || "No notes added yet."}
+                      {displayClient.notes || "No notes added yet."}
                     </p>
                   </div>
 
                   <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 shadow-sm">
                     <div className="flex items-center justify-between mb-4">
                       <p className="text-sm font-semibold text-rose-900">Internal Notes</p>
-                      <Button variant="outline" size="sm" className="rounded-full border-rose-300 text-rose-700">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full border-rose-300 text-rose-700"
+                      >
                         <Plus className="h-4 w-4 mr-2" />
                         Add Note
                       </Button>
                     </div>
                     <p className="text-sm text-rose-700">
-                      {client.internalNotes || "No internal notes. Add red flags, pricing info, etc."}
+                      {displayClient.internalNotes ||
+                        "No internal notes. Add red flags, pricing info, etc."}
                     </p>
                   </div>
                 </div>
@@ -561,7 +593,12 @@ export function ClientDetailDrawer({
             </DialogHeader>
 
             <div className="grid gap-6 py-4">
-              <RadioGroup defaultValue="manual" value={creationMode} onValueChange={(v: "manual" | "ai") => setCreationMode(v)} className="grid grid-cols-2 gap-4">
+              <RadioGroup
+                defaultValue="manual"
+                value={creationMode}
+                onValueChange={(v: "manual" | "ai") => setCreationMode(v)}
+                className="grid grid-cols-2 gap-4"
+              >
                 <div>
                   <RadioGroupItem value="manual" id="mode-manual" className="peer sr-only" />
                   <Label
@@ -586,15 +623,15 @@ export function ClientDetailDrawer({
 
               {client && (
                 <div className="min-h-[400px]">
-                  {creationMode === 'manual' ? (
+                  {creationMode === "manual" ? (
                     <ProjectForm
-                      clientId={client.id}
-                      clientName={client.name}
+                      clientId={displayClient.id}
+                      clientName={displayClient.name}
                       onSuccess={handleProjectCreated}
                     />
                   ) : (
                     <AiProjectWizard
-                      defaultClientId={client.id}
+                      defaultClientId={displayClient.id}
                       onSuccess={handleProjectCreated}
                     />
                   )}

@@ -2,8 +2,9 @@ import { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
 import bcrypt from "bcryptjs";
+import { PlatformRole } from "@prisma/client";
+import { ensureActiveWorkspace } from "@/lib/workspace";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -34,13 +35,13 @@ export const authOptions: NextAuthOptions = {
           throw new Error("Use Google sign-in for this account");
         }
 
-        if (!user.emailVerified) {
-          throw new Error("Verify email to continue");
-        }
-
         const valid = await bcrypt.compare(password, user.password);
         if (!valid) {
           throw new Error("Invalid credentials");
+        }
+
+        if (user.status !== "ACTIVE") {
+          throw new Error("Account is suspended or deleted");
         }
 
         return {
@@ -58,78 +59,114 @@ export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   callbacks: {
     async signIn({ user, account, profile }) {
-      // For Google OAuth, ensure user exists in database
       if (account?.provider === "google" && user.email) {
         const email = user.email.toLowerCase().trim();
         let dbUser = await prisma.user.findUnique({ where: { email } });
 
         if (!dbUser) {
-          // Create user if they don't exist
           dbUser = await prisma.user.create({
             data: {
               email,
               name: user.name ?? email.split("@")[0],
               image: user.image ?? null,
               emailVerified: new Date(),
+              status: "ACTIVE",
+              platformRole: "USER",
             },
           });
-        } else if (!dbUser.emailVerified) {
-          // Update emailVerified if user exists but wasn't verified
-          dbUser = await prisma.user.update({
+        } else {
+          // Block suspended users
+          if (dbUser.status !== "ACTIVE") return false;
+
+          // Update basic profile info
+          await prisma.user.update({
             where: { id: dbUser.id },
-            data: { emailVerified: new Date(), image: user.image ?? dbUser.image },
+            data: { image: user.image ?? dbUser.image, lastLoginAt: new Date() },
           });
         }
-
-        // Set the database user ID as the token sub
         user.id = dbUser.id;
       }
       return true;
     },
-    async jwt({ token, user, trigger }) {
-      // On first sign in, use the user.id (which we set in signIn callback)
-      if (user?.id) {
+    async jwt({ token, user, trigger, session }) {
+      // Initial sign in
+      if (user) {
         token.sub = user.id;
       }
 
-      if (!token.sub) {
-        return token;
+      // Handle Active Workspace updates (Client sending update)
+      if (trigger === "update" && session?.activeWorkspaceId) {
+        token.workspaceId = session.activeWorkspaceId;
+        // Persist preference to DB for convenience (optional)
+        await prisma.user
+          .update({
+            where: { id: token.sub },
+            data: { activeWorkspaceId: session.activeWorkspaceId },
+          })
+          .catch(console.error);
       }
 
-      if (user || trigger === "update") {
+      // If no workspace in token, try to load last valid one from DB or first available
+      if (!token.workspaceId && token.sub) {
         const dbUser = await prisma.user.findUnique({
           where: { id: token.sub },
-          include: { activeWorkspace: true },
+          select: { activeWorkspaceId: true },
         });
 
-        if (dbUser) {
-          const workspace =
-            dbUser.activeWorkspace ||
-            (await ensureActiveWorkspace(dbUser.id, dbUser.name ?? dbUser.email));
-
-          token.name = dbUser.name ?? token.name;
-          token.role = dbUser.role ?? "Founder";
-          token.timezone = dbUser.timezone ?? "Asia/Kolkata";
-          token.currency = dbUser.currency ?? "INR";
-          token.reminderTone = dbUser.reminderTone ?? "Warm + Polite";
-          token.backupEmail = dbUser.backupEmail ?? null;
-          token.workspaceId = workspace?.id ?? null;
-          token.workspaceName = workspace?.name ?? null;
+        if (dbUser?.activeWorkspaceId) {
+          token.workspaceId = dbUser.activeWorkspaceId;
+        } else {
+          // Fallback: Find first membership
+          const firstMember = await prisma.workspaceMember.findFirst({
+            where: { userId: token.sub },
+            select: { workspaceId: true },
+          });
+          if (firstMember) token.workspaceId = firstMember.workspaceId;
         }
       }
+
+      // Enforce Rule C: JWT stays minimal.
+      // We do NOT attach role, currency, etc.
+      // We only keep userId (sub) and workspaceId.
 
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.sub as string;
-        session.user.role = (token.role as string) || undefined;
-        session.user.timezone = (token.timezone as string) || undefined;
-        session.user.currency = (token.currency as string) || undefined;
-        session.user.reminderTone = (token.reminderTone as string) || undefined;
-        session.user.backupEmail = (token.backupEmail as string) || undefined;
         session.user.activeWorkspaceId = (token.workspaceId as string) || undefined;
-        session.user.workspaceName = (token.workspaceName as string) || undefined;
+
+        // 1. Load Platform Role (Identity)
+        if (session.user.id) {
+          const user = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: { platformRole: true, email: true },
+          });
+          if (user) {
+            (session.user as any).platformRole = user.platformRole;
+          }
+        }
+
+        // 2. Load Workspace Defaults (Rule B: Store Identity only, fetch Defaults from Workspace)
+        if (session.user.activeWorkspaceId) {
+          const workspaceSettings = await prisma.workspaceSettings.findUnique({
+            where: { workspaceId: session.user.activeWorkspaceId },
+          });
+
+          if (workspaceSettings) {
+            // Map workspace settings to session user for frontend compatibility
+            session.user.currency = workspaceSettings.currency;
+            session.user.timezone = workspaceSettings.timezone;
+            session.user.reminderTone = workspaceSettings.defaultReminderTone || "Warm + Polite";
+          }
+
+          // Fetch workspace name if missing from token (minimal JWT)
+          const workspace = await prisma.workspace.findUnique({
+            where: { id: session.user.activeWorkspaceId },
+            select: { name: true },
+          });
+          if (workspace) session.user.workspaceName = workspace.name;
+        }
       }
       return session;
     },

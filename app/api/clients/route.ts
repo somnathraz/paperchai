@@ -6,6 +6,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { clientCreateSchema } from "@/lib/api-schemas";
+import { assertLimit } from "@/lib/usage";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -25,36 +26,38 @@ export async function GET(req: Request) {
   const clients = await prisma.client.findMany({
     where: {
       workspaceId: workspace.id,
-      ...(search ? {
-        OR: [
-          { name: { contains: search, mode: "insensitive" } },
-          { email: { contains: search, mode: "insensitive" } },
-          { company: { contains: search, mode: "insensitive" } },
-        ]
-      } : {})
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+              { company: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
     },
     orderBy: { createdAt: "desc" },
     include: {
       _count: {
         select: {
           projects: true,
-          invoices: true
-        }
+          invoices: true,
+        },
       },
       projects: {
         take: 1,
         orderBy: { updatedAt: "desc" },
-        select: { updatedAt: true }
-      }
-    }
+        select: { updatedAt: true },
+      },
+    },
   });
 
   // Transform to include lastActivity
-  const enhancedClients = clients.map(client => ({
+  const enhancedClients = clients.map((client) => ({
     ...client,
     projectsCount: client._count.projects,
     invoicesCount: client._count.invoices,
-    lastActivity: client.projects[0]?.updatedAt || client.updatedAt
+    lastActivity: client.projects[0]?.updatedAt || client.updatedAt,
   }));
 
   return NextResponse.json({ clients: enhancedClients });
@@ -69,6 +72,13 @@ export async function POST(req: Request) {
   const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  }
+
+  // Check Limit
+  try {
+    await assertLimit(workspace.id, session.user.id, "clients");
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 402 }); // Payment Required
   }
 
   // Validate input with Zod (sanitizes strings automatically)
@@ -96,4 +106,3 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ client });
 }
-

@@ -15,11 +15,14 @@ export async function POST(req: Request) {
     }
 
     if (passwordValue.length < 8) {
-      return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 422 });
+      return NextResponse.json(
+        { error: "Password must be at least 8 characters" },
+        { status: 422 }
+      );
     }
 
     const tokenHash = hashToken(token as string);
-    const record = await prisma.passwordResetToken.findUnique({ where: { tokenHash } });
+    const record = await prisma.passwordResetToken.findUnique({ where: { token: tokenHash } });
     if (!record || record.expires < new Date()) {
       return NextResponse.json({ error: "Invalid or expired token" }, { status: 400 });
     }
@@ -31,7 +34,7 @@ export async function POST(req: Request) {
       data: { password: hashed, emailVerified: new Date() },
     });
 
-    await prisma.passwordResetToken.delete({ where: { tokenHash } });
+    await prisma.passwordResetToken.delete({ where: { token: tokenHash } });
 
     return NextResponse.json({ success: true });
   } catch (error) {

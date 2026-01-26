@@ -28,11 +28,14 @@ export default async function ProfileSettingsPage() {
       <ProfileForm
         initialData={{
           name: user.name ?? "",
-          role: user.role ?? "Founder",
-          timezone: user.timezone ?? "Asia/Kolkata",
-          currency: user.currency ?? "INR",
-          reminderTone: user.reminderTone ?? "Warm + Polite",
-          backupEmail: user.backupEmail ?? "",
+          role: user.platformRole === "INTERNAL_OWNER" ? "Admin" : "Member", // Mapping
+          // Legacy fields removed from user, now on workspace.
+          // We should ideally fetch workspace settings here or drop these from the form.
+          // For now, providing defaults to satisfy the UI component prop types.
+          timezone: "Asia/Kolkata",
+          currency: "INR",
+          reminderTone: "Warm + Polite",
+          backupEmail: "",
         }}
       />
     </SettingsLayout>

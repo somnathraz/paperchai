@@ -16,7 +16,7 @@ export async function GET() {
   const memberships = await prisma.workspaceMember.findMany({
     where: { userId: session.user.id },
     include: { workspace: true },
-    orderBy: { createdAt: "asc" },
+    orderBy: { joinedAt: "asc" },
   });
 
   const cookieStore = await cookies();
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
         members: {
           create: {
             userId: user.id,
-            role: "owner",
+            role: "OWNER",
           },
         },
       },

@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     }
 
     const tokenHash = hashToken(token as string);
-    const record = await prisma.verificationToken.findUnique({ where: { tokenHash } });
+    const record = await prisma.verificationToken.findUnique({ where: { token: tokenHash } });
     if (!record || record.expires < new Date()) {
       return NextResponse.json({ error: "Invalid or expired token" }, { status: 400 });
     }
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
       data: { emailVerified: new Date() },
     });
 
-    await prisma.verificationToken.delete({ where: { tokenHash } });
+    await prisma.verificationToken.delete({ where: { token: tokenHash } });
 
     return NextResponse.json({ success: true });
   } catch (error) {
