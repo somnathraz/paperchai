@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { Mail, Lock, UserPlus, AlertCircle } from "lucide-react";
+import { Mail, Lock, UserPlus, AlertCircle, User } from "lucide-react";
 import { useAuth, useAuthRedirect } from "@/features/auth/hooks";
 import { validateEmail, validatePassword, validatePasswordMatch } from "@/features/auth/utils";
 import { AuthLayout } from "@/components/auth/AuthLayout";
@@ -20,6 +20,7 @@ const quickFacts = [
 ];
 
 export default function SignupPage() {
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -33,12 +34,23 @@ export default function SignupPage() {
 
   // Memoized validations
   const emailValidation = useMemo(() => validateEmail(email), [email]);
+  const nameValidation = useMemo(
+    () => name.trim().length >= 2 && name.trim().length <= 100,
+    [name]
+  );
   const passwordValidation = useMemo(() => validatePassword(password), [password]);
-  const passwordMatchValidation = useMemo(() => validatePasswordMatch(password, confirm), [password, confirm]);
+  const passwordMatchValidation = useMemo(
+    () => validatePasswordMatch(password, confirm),
+    [password, confirm]
+  );
 
   const canSubmit = useMemo(
-    () => emailValidation && passwordValidation.valid && passwordMatchValidation.valid,
-    [emailValidation, passwordValidation, passwordMatchValidation]
+    () =>
+      nameValidation &&
+      emailValidation &&
+      passwordValidation.valid &&
+      passwordMatchValidation.valid,
+    [nameValidation, emailValidation, passwordValidation, passwordMatchValidation]
   );
 
   // useCallback for stable references
@@ -56,6 +68,10 @@ export default function SignupPage() {
       setLocalError(null);
 
       // Validation
+      if (!nameValidation) {
+        setLocalError("Enter your name (2-100 characters).");
+        return;
+      }
       if (!emailValidation) {
         setLocalError("Enter a valid email.");
         return;
@@ -69,16 +85,28 @@ export default function SignupPage() {
         return;
       }
 
-      const result = await signup(email, password);
+      const result = await signup(email, password, name.trim());
 
       // Clear form on success
       if (!result.type.includes("rejected")) {
+        setName("");
         setEmail("");
         setPassword("");
         setConfirm("");
       }
     },
-    [email, password, confirm, emailValidation, passwordValidation, passwordMatchValidation, signup, clearError, clearStatus]
+    [
+      name,
+      email,
+      password,
+      nameValidation,
+      emailValidation,
+      passwordValidation,
+      passwordMatchValidation,
+      signup,
+      clearError,
+      clearStatus,
+    ]
   );
 
   const displayError = localError || error;
@@ -99,6 +127,16 @@ export default function SignupPage() {
           <DividerLine />
 
           <form className="space-y-4" onSubmit={handleSignup}>
+            <InputField
+              label="Full name"
+              icon={User}
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Your name"
+              disabled={isLoading}
+              autoComplete="name"
+            />
             <InputField
               label="Email"
               icon={Mail}
@@ -142,7 +180,11 @@ export default function SignupPage() {
               </div>
             )}
 
-            <PrimaryButton type="submit" icon={<UserPlus className="h-4 w-4" />} disabled={isLoading || !canSubmit}>
+            <PrimaryButton
+              type="submit"
+              icon={<UserPlus className="h-4 w-4" />}
+              disabled={isLoading || !canSubmit}
+            >
               {isLoading ? "Creating..." : "Create account"}
             </PrimaryButton>
           </form>

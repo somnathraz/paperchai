@@ -47,11 +47,15 @@ export default async function NewInvoicePage({ searchParams }: PageProps) {
       const automation = sendMeta.automation || {};
       const automationApproval = automation.approvalStatus
         ? {
-            status: automation.approvalStatus as "PENDING" | "APPROVED",
+            status: automation.approvalStatus as "PENDING" | "APPROVED" | "REJECTED",
             requestedAt: automation.approvalRequestedAt,
             approvedAt: automation.approvedAt,
+            rejectedAt: automation.rejectedAt,
+            rejectionReason: automation.rejectionReason,
             scheduledSendAt: automation.scheduledSendAt,
             ruleId: automation.ruleId,
+            escalationCount: automation.escalationCount,
+            lastEscalatedAt: automation.lastEscalatedAt,
           }
         : undefined;
       initialFormState = {

@@ -5,6 +5,38 @@ import { replaceTemplateVariables, TemplateVars } from "@/lib/reminders";
 import { getThemeHtml } from "@/lib/email-themes"; // Reusing existing theme generator if possible or just raw body
 import { logCronEvent } from "@/lib/security/audit-log";
 import { securityConfig } from "@/lib/security/security.config";
+import { buildAppUrl } from "@/lib/app-url";
+
+const STEP_RETRY_DELAY_MINUTES = 20;
+const MAX_STEP_RETRIES = 3;
+
+async function updateReminderWorkerMeta(
+  invoiceId: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const invoice = await prisma.invoice.findUnique({
+    where: { id: invoiceId },
+    select: { id: true, sendMeta: true },
+  });
+
+  if (!invoice) return;
+  const sendMeta = (invoice.sendMeta as Record<string, unknown>) || {};
+  const workerMeta = (sendMeta.reminderWorker as Record<string, unknown>) || {};
+
+  await prisma.invoice.update({
+    where: { id: invoice.id },
+    data: {
+      sendMeta: {
+        ...sendMeta,
+        reminderWorker: {
+          ...workerMeta,
+          ...patch,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    },
+  });
+}
 
 // POST /api/internal/reminders/run
 export async function POST(req: NextRequest) {
@@ -28,8 +60,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }
     }
-
-    console.log("Worker started: Processing reminders...");
 
     const now = new Date();
 
@@ -67,11 +97,17 @@ export async function POST(req: NextRequest) {
       take: 50, // process in batches
     });
 
-    console.log(`Found ${pendingSteps.length} pending reminders.`);
-
     const results = [];
 
     for (const step of pendingSteps) {
+      const claimed = await prisma.invoiceReminderStep.updateMany({
+        where: { id: step.id, status: "PENDING" },
+        data: { status: "PROCESSING", updatedAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        continue;
+      }
+
       const invoice = step.schedule.invoice;
       const client = invoice.client;
       const workspace = invoice.workspace;
@@ -83,6 +119,11 @@ export async function POST(req: NextRequest) {
           where: { id: step.id },
           data: { status: "SKIPPED", updatedAt: new Date() },
         });
+        await updateReminderWorkerMeta(invoice.id, {
+          lastStepId: step.id,
+          lastStatus: "SKIPPED",
+          lastError: null,
+        });
         results.push({
           id: step.id,
           status: "SKIPPED",
@@ -92,9 +133,33 @@ export async function POST(req: NextRequest) {
       }
 
       if (!client.email) {
+        const sendMeta = (invoice.sendMeta as Record<string, any>) || {};
+        const workerMeta = (sendMeta.reminderWorker as Record<string, any>) || {};
+        const retryByStep = (workerMeta.retryByStep as Record<string, number>) || {};
+        const retryCount = Number(retryByStep[step.id] || 0) + 1;
+        const shouldRetry = retryCount < MAX_STEP_RETRIES;
+        const retryAt = new Date(Date.now() + STEP_RETRY_DELAY_MINUTES * 60 * 1000);
+
         await prisma.invoiceReminderStep.update({
           where: { id: step.id },
-          data: { status: "FAILED", lastError: "Client has no email", updatedAt: new Date() },
+          data: shouldRetry
+            ? {
+                status: "PENDING",
+                lastError: "Client has no email",
+                sendAt: retryAt,
+                updatedAt: new Date(),
+              }
+            : { status: "FAILED", lastError: "Client has no email", updatedAt: new Date() },
+        });
+        await updateReminderWorkerMeta(invoice.id, {
+          lastStepId: step.id,
+          lastStatus: shouldRetry ? "FAILED_RETRYING" : "FAILED",
+          lastError: "Client has no email",
+          retryByStep: {
+            ...retryByStep,
+            [step.id]: retryCount,
+          },
+          nextRetryAt: shouldRetry ? retryAt.toISOString() : null,
         });
         results.push({ id: step.id, status: "FAILED", reason: "No client email" });
         continue;
@@ -104,6 +169,11 @@ export async function POST(req: NextRequest) {
         await prisma.invoiceReminderStep.update({
           where: { id: step.id },
           data: { status: "FAILED", lastError: "Template not found", updatedAt: new Date() },
+        });
+        await updateReminderWorkerMeta(invoice.id, {
+          lastStepId: step.id,
+          lastStatus: "FAILED",
+          lastError: "Template not found",
         });
         results.push({ id: step.id, status: "FAILED", reason: "Template missing" });
         continue;
@@ -122,7 +192,7 @@ export async function POST(req: NextRequest) {
         amount: formattedAmount,
         dueDate: formattedDueDate,
         companyName: workspace.name,
-        paymentLink: `https://paperchai.com/pay/${invoice.id}`, // Mock link
+        paymentLink: buildAppUrl(`/pay/${invoice.id}`),
       };
 
       const subject = replaceTemplateVariables(template.subject, vars);
@@ -155,6 +225,16 @@ export async function POST(req: NextRequest) {
           where: { id: step.id },
           data: { status: "SENT", updatedAt: new Date() },
         });
+        const sendMeta = (invoice.sendMeta as Record<string, any>) || {};
+        const workerMeta = (sendMeta.reminderWorker as Record<string, any>) || {};
+        const sentCount = Number(workerMeta.sentCount || 0) + 1;
+        await updateReminderWorkerMeta(invoice.id, {
+          lastStepId: step.id,
+          lastStatus: "SENT",
+          lastError: null,
+          sentCount,
+          lastSentAt: new Date().toISOString(),
+        });
         results.push({ id: step.id, status: "SENT" });
 
         // Also log to ReminderHistory? The schema has it.
@@ -173,17 +253,57 @@ export async function POST(req: NextRequest) {
         });
       } catch (err: any) {
         console.error(`Failed to send reminder step ${step.id}`, err);
+        const message = err instanceof Error ? err.message : "Unknown reminder send error";
+        const sendMeta = (invoice.sendMeta as Record<string, any>) || {};
+        const workerMeta = (sendMeta.reminderWorker as Record<string, any>) || {};
+        const retryByStep = (workerMeta.retryByStep as Record<string, number>) || {};
+        const retryCount = Number(retryByStep[step.id] || 0) + 1;
+        const shouldRetry = retryCount < MAX_STEP_RETRIES;
+        const retryAt = new Date(Date.now() + STEP_RETRY_DELAY_MINUTES * 60 * 1000);
+
         await prisma.invoiceReminderStep.update({
           where: { id: step.id },
-          data: { status: "FAILED", lastError: err.message, updatedAt: new Date() },
+          data: shouldRetry
+            ? {
+                status: "PENDING",
+                sendAt: retryAt,
+                lastError: message,
+                updatedAt: new Date(),
+              }
+            : { status: "FAILED", lastError: message, updatedAt: new Date() },
         });
-        results.push({ id: step.id, status: "FAILED", error: err.message });
+        const failedCount = Number(workerMeta.failedCount || 0) + 1;
+        await updateReminderWorkerMeta(invoice.id, {
+          lastStepId: step.id,
+          lastStatus: shouldRetry ? "FAILED_RETRYING" : "FAILED",
+          lastError: message,
+          failedCount,
+          retryByStep: {
+            ...retryByStep,
+            [step.id]: retryCount,
+          },
+          nextRetryAt: shouldRetry ? retryAt.toISOString() : null,
+        });
+
+        results.push({
+          id: step.id,
+          status: shouldRetry ? "FAILED_RETRYING" : "FAILED",
+          error: message,
+        });
       }
     }
+
+    await logCronEvent("CRON_EXECUTED", "internal/reminders/run", {
+      processed: results.length,
+      timestamp: now.toISOString(),
+    });
 
     return NextResponse.json({ processed: results.length, results });
   } catch (error) {
     console.error("Worker error:", error);
+    await logCronEvent("CRON_FAILED", "internal/reminders/run", {
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
     return NextResponse.json({ error: "Worker failed" }, { status: 500 });
   }
 }

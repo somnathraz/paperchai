@@ -8,6 +8,30 @@ import { sendInvoiceEmail } from "@/lib/invoices/send-invoice";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 import { prisma } from "@/lib/prisma";
 import { assertFeature } from "@/lib/entitlements";
+import { z } from "zod";
+import { canSendInvoiceStatus, isValidInvoiceDateOrder } from "@/lib/invoices/workflow-validation";
+
+const reminderSettingsSchema = z.object({
+  startDaysBefore: z.number().int().min(0).max(365).optional(),
+  followUpDays: z.number().int().min(1).max(90),
+  maxReminders: z.number().int().min(1).max(20),
+  channels: z
+    .array(z.enum(["email", "whatsapp", "both"]))
+    .max(3)
+    .optional(),
+  tone: z.string().max(50).optional(),
+  autoStopOnPayment: z.boolean().optional(),
+});
+
+const sendInvoiceSchema = z.object({
+  invoiceId: z.string().cuid(),
+  channel: z.enum(["email", "whatsapp", "both"]).optional().default("email"),
+  recipientEmail: z.string().email().max(254).optional(),
+  idempotencyKey: z.string().min(8).max(128).optional(),
+  notes: z.string().max(5000).optional(),
+  automationEnabled: z.boolean().optional().default(false),
+  reminderSettings: reminderSettingsSchema.optional(),
+});
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -25,11 +49,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = await req.json();
-  const { invoiceId, channel = "email", notes, automationEnabled, reminderSettings } = body;
-
-  if (!invoiceId) {
-    return NextResponse.json({ error: "invoiceId required" }, { status: 400 });
+  let invoiceId: string;
+  let channel: "email" | "whatsapp" | "both";
+  let recipientEmail: string | undefined;
+  let idempotencyKey: string | undefined;
+  let notes: string | undefined;
+  let automationEnabled: boolean;
+  let reminderSettings: z.infer<typeof reminderSettingsSchema> | undefined;
+  try {
+    const parsed = sendInvoiceSchema.parse(await req.json());
+    invoiceId = parsed.invoiceId;
+    channel = parsed.channel;
+    recipientEmail = parsed.recipientEmail;
+    idempotencyKey = parsed.idempotencyKey;
+    notes = parsed.notes;
+    automationEnabled = parsed.automationEnabled;
+    reminderSettings = parsed.reminderSettings;
+  } catch {
+    return NextResponse.json({ error: "Invalid request payload" }, { status: 422 });
   }
 
   // Feature Gate: Reminders
@@ -41,12 +78,76 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, workspaceId: workspace.id },
+    select: {
+      id: true,
+      number: true,
+      status: true,
+      issueDate: true,
+      dueDate: true,
+      workspaceId: true,
+      sendMeta: true,
+      client: {
+        select: {
+          email: true,
+        },
+      },
+    },
+  });
+  if (!invoice) {
+    return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+  }
+  if (!canSendInvoiceStatus(invoice.status)) {
+    return NextResponse.json(
+      { error: `Cannot send invoice in '${invoice.status}' status` },
+      { status: 409 }
+    );
+  }
+  if (!invoice.dueDate) {
+    return NextResponse.json({ error: "Due date is required before sending" }, { status: 422 });
+  }
+  if (!isValidInvoiceDateOrder(invoice.issueDate, invoice.dueDate)) {
+    return NextResponse.json(
+      { error: "Due date cannot be earlier than issue date" },
+      { status: 422 }
+    );
+  }
+  if (channel !== "whatsapp" && !recipientEmail && !invoice.client?.email) {
+    return NextResponse.json(
+      { error: "Client email is required for email delivery" },
+      { status: 422 }
+    );
+  }
+  const previousSendMeta = (invoice.sendMeta as Record<string, any> | null) || {};
+  const previousKey = previousSendMeta?.lastSendRequest?.idempotencyKey;
+  if (idempotencyKey && previousKey === idempotencyKey && invoice.status === "sent") {
+    return NextResponse.json({
+      ok: true,
+      idempotentReplay: true,
+      invoice,
+      emailSent: true,
+      sentTo: recipientEmail || invoice.client?.email || null,
+      templateUsed: previousSendMeta?.templateSlug || "default",
+    });
+  }
+
   try {
     const result = await sendInvoiceEmail({
       invoiceId,
       workspaceId: workspace.id,
       channel,
+      recipientEmail,
       notes,
+      sendMeta: idempotencyKey
+        ? {
+            lastSendRequest: {
+              idempotencyKey,
+              at: new Date().toISOString(),
+              channel,
+            },
+          }
+        : undefined,
       approvedBy: session.user.id,
     });
 
@@ -108,7 +209,7 @@ export async function POST(req: NextRequest) {
       // Step B: Follow-ups (Post-due)
       // Continue until we reach maxReminders
       let followUpIndex = 1;
-      while (count < maxReminders) {
+      while (count < maxReminders && followUpDays > 0) {
         const daysAfter = followUpIndex * followUpDays;
         const followUpAt = new Date(dueDate);
         followUpAt.setDate(followUpAt.getDate() + daysAfter);

@@ -6,9 +6,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateContentSafe } from "@/lib/ai-service";
 import { AI_CONFIG } from "@/lib/ai-config";
+import { ensureActiveWorkspace } from "@/lib/workspace";
 
 const SYSTEM_PROMPT = `You are PaperChai AI, an expert at extracting business data from Notion pages.
 
@@ -77,6 +80,15 @@ type ExtractRequest = {
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+    if (!workspace) {
+      return NextResponse.json({ success: false, error: "No active workspace" }, { status: 400 });
+    }
+
     const body: ExtractRequest = await request.json();
 
     if (!body.properties && !body.textContent) {
@@ -86,11 +98,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (!body.workspaceId) {
-      return NextResponse.json({
-        success: false,
-        error: "Workspace ID required",
-      });
+    // Enforce workspace scope from authenticated session (ignore caller-supplied workspaceId).
+    const workspaceId = workspace.id;
+    if (body.workspaceId && body.workspaceId !== workspaceId) {
+      return NextResponse.json({ success: false, error: "Workspace mismatch" }, { status: 403 });
     }
 
     // Build prompt with properties and content
@@ -179,7 +190,7 @@ Extract the relevant data for this ${body.importType} import. If type is AUTO, d
       if (parsed.client) {
         let client = await prisma.client.findFirst({
           where: {
-            workspaceId: body.workspaceId,
+            workspaceId,
             name: { contains: parsed.client, mode: "insensitive" },
           },
         });
@@ -187,7 +198,7 @@ Extract the relevant data for this ${body.importType} import. If type is AUTO, d
         if (!client) {
           client = await prisma.client.create({
             data: {
-              workspaceId: body.workspaceId,
+              workspaceId,
               name: parsed.client,
             },
           });
@@ -198,7 +209,7 @@ Extract the relevant data for this ${body.importType} import. If type is AUTO, d
       // Create project
       const project = await prisma.project.create({
         data: {
-          workspaceId: body.workspaceId,
+          workspaceId,
           name: parsed.name,
           description: parsed.description || "",
           clientId,
@@ -232,7 +243,7 @@ Extract the relevant data for this ${body.importType} import. If type is AUTO, d
       // Create client
       const client = await prisma.client.create({
         data: {
-          workspaceId: body.workspaceId,
+          workspaceId,
           name: parsed.name,
           company: parsed.company || parsed.name,
           contactPerson: parsed.contactPerson,

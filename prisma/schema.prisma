@@ -85,6 +85,7 @@ model User {
   // actually, let's keep SavedItem on User for now as "Personal Library" unless specified otherwise, but strict Multi-tenancy usually puts this in Workspace.
   // User said: "Workspace defaults... do not belong on User". SavedItem is data.
   savedItems      SavedItem[]
+  integrationIdentities IntegrationIdentity[]
 
   @@index([platformRole])
   @@index([status])
@@ -147,7 +148,13 @@ model Workspace {
   agreements       Agreement[]
   meetingNotes     MeetingNote[]
   automationRules  AutomationRule[]
+  recurringPlans   RecurringInvoicePlan[]
+  recurringRuns    RecurringInvoiceRunLog[]
   reminderSettings ReminderSettings? // This might be redundant with WorkspaceSettings, check later
+  integrationIdentities IntegrationIdentity[]
+  botCommandEvents BotCommandEvent[]
+  approvalRequests ApprovalRequest[]
+  outboundMessageLogs OutboundMessageLog[]
 
   // Legacy Fields for Migration (Do not use in new code)
   ownerId         String?
@@ -383,6 +390,7 @@ model Client {
   documents        ClientDocument[]
   projects         Project[]
   invoices         Invoice[]
+  recurringPlans   RecurringInvoicePlan[]
   clientAgreements Agreement[]
   meetingNotes     MeetingNote[]
   createdAt        DateTime  @default(now())
@@ -427,6 +435,7 @@ model Project {
   
   // Relations
   invoices       Invoice[]
+  recurringPlans RecurringInvoicePlan[]
   reminders      ReminderHistory[]
   documents      ClientDocument[]
   
@@ -544,10 +553,16 @@ model Invoice {
   source       String?        // "slack", "notion", "manual", "api"
   sourceImportId String?      // ID of SlackImport or NotionImport
   
+  // R2 storage for generated PDF
+  pdfKey       String?        // path in storage (e.g., invoices/inv_abc123.pdf)
+  
   items        InvoiceItem[]
   reminders    ReminderHistory[]
+  recurringRuns RecurringInvoiceRunLog[]
+  botCommandEvents BotCommandEvent[]
   remindersEnabled Boolean        @default(false)
   reminderSchedule InvoiceReminderSchedule?
+  approvalRequests ApprovalRequest[]
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 }
@@ -914,6 +929,55 @@ enum IntegrationProvider {
   NOTION
 }
 
+enum IntegrationIdentityProvider {
+  SLACK
+  WHATSAPP
+  NOTION
+  EMAIL
+}
+
+enum BotCommandSource {
+  SLACK
+  WHATSAPP
+  EMAIL
+  NOTION
+}
+
+enum BotCommandStatus {
+  RECEIVED
+  PARSED
+  REJECTED
+  EXECUTED
+  FAILED
+  DUPLICATE
+}
+
+enum ApprovalEntityType {
+  INVOICE
+}
+
+enum ApprovalRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum OutboundMessageProvider {
+  SLACK
+  WHATSAPP
+  EMAIL
+}
+
+enum OutboundMessageStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+  RETRYING
+}
+
 enum ConnectionStatus {
   CONNECTED
   DISCONNECTED
@@ -1022,6 +1086,186 @@ enum AutomationSource {
   NOTION_IMPORT
   SLACK_IMPORT
   AI_SUGGESTION
+}
+
+enum RecurringPlanSourceType {
+  FIXED_TEMPLATE
+  MILESTONES_READY
+  TIMESHEET_HOURS
+  MANUAL_REVIEW
+}
+
+enum RecurringPlanIntervalUnit {
+  DAYS
+  WEEKS
+  MONTHS
+}
+
+enum RecurringPlanFallbackPolicy {
+  SKIP_AND_NOTIFY
+  CREATE_ZERO_DRAFT
+  USE_MINIMUM_FEE
+}
+
+enum RecurringPlanStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum RecurringPlanRunStatus {
+  PROCESSING
+  SUCCESS
+  SKIPPED
+  FAILED
+}
+
+model RecurringInvoicePlan {
+  id                String                       @id @default(cuid())
+  workspaceId       String
+  workspace         Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  clientId          String
+  client            Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  projectId         String?
+  project           Project?                     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  name              String
+  sourceType        RecurringPlanSourceType
+  status            RecurringPlanStatus          @default(ACTIVE)
+  intervalUnit      RecurringPlanIntervalUnit
+  intervalValue     Int
+  monthlyDay        Int?
+  nextRunAt         DateTime
+  lastRunAt         DateTime?
+  lastSuccessAt     DateTime?
+  lastError         String?
+  autoSend          Boolean                      @default(false)
+  approvalRequired  Boolean                      @default(true)
+  fallbackPolicy    RecurringPlanFallbackPolicy  @default(SKIP_AND_NOTIFY)
+  minimumFee        Int?
+  dueDaysAfterIssue Int                          @default(7)
+  channel           String                       @default("email")
+  currency          String                       @default("INR")
+  snapshot          Json?
+  metadata          Json?
+  runCount          Int                          @default(0)
+  failureCount      Int                          @default(0)
+  createdByUserId   String?
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+  runs              RecurringInvoiceRunLog[]
+
+  @@index([workspaceId, status, nextRunAt])
+  @@index([clientId])
+  @@index([projectId])
+}
+
+model RecurringInvoiceRunLog {
+  id          String                 @id @default(cuid())
+  planId       String
+  plan         RecurringInvoicePlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  workspaceId  String
+  workspace    Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invoiceId    String?
+  invoice      Invoice?               @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  runKey       String                 @unique
+  status       RecurringPlanRunStatus
+  message      String?
+  data         Json?
+  createdAt    DateTime               @default(now())
+
+  @@index([planId, createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+model IntegrationIdentity {
+  id             String                      @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  provider       IntegrationIdentityProvider
+  externalUserId String
+  internalUserId String
+  user           User                        @relation(fields: [internalUserId], references: [id], onDelete: Cascade)
+  roleSnapshot   String?
+  active         Boolean                     @default(true)
+  metadata       Json?
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+
+  @@unique([workspaceId, provider, externalUserId])
+  @@index([workspaceId, provider, active])
+  @@index([internalUserId, active])
+}
+
+model BotCommandEvent {
+  id                  String           @id @default(cuid())
+  workspaceId         String
+  workspace           Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  source              BotCommandSource
+  status              BotCommandStatus @default(RECEIVED)
+  externalEventId     String?          @unique
+  providerWorkspaceId String?
+  actorExternalId     String?
+  actorUserId         String?
+  command             String
+  rawText             String?
+  parsedData          Json?
+  channelId           String?
+  threadTs            String?
+  responseUrl         String?
+  linkedInvoiceId     String?
+  invoice             Invoice?         @relation(fields: [linkedInvoiceId], references: [id], onDelete: SetNull)
+  errorMessage        String?
+  processedAt         DateTime?
+  metadata            Json?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@index([workspaceId, source, status, createdAt])
+  @@index([providerWorkspaceId, source, createdAt])
+}
+
+model ApprovalRequest {
+  id                  String                @id @default(cuid())
+  workspaceId         String
+  workspace           Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entityType          ApprovalEntityType    @default(INVOICE)
+  invoiceId           String?
+  invoice             Invoice?              @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  status              ApprovalRequestStatus @default(PENDING)
+  requestedByUserId   String?
+  requestedByExternalId String?
+  approverUserId      String?
+  decisionNote        String?
+  source              String?
+  metadata            Json?
+  expiresAt           DateTime?
+  decidedAt           DateTime?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  @@index([workspaceId, status, createdAt])
+  @@index([invoiceId, status])
+}
+
+model OutboundMessageLog {
+  id               String                  @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  provider         OutboundMessageProvider
+  targetExternalId String
+  messageType      String
+  payloadHash      String?
+  providerMessageId String?
+  status           OutboundMessageStatus   @default(PENDING)
+  errorMessage     String?
+  retryCount       Int                     @default(0)
+  metadata         Json?
+  sentAt           DateTime?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([workspaceId, provider, createdAt])
+  @@index([provider, status, createdAt])
 }
 
 // --- Security Audit Log ---

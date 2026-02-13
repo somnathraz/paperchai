@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { assertLimit } from "@/lib/usage";
 import crypto from "crypto";
 
+const VALID_ROLES = new Set(["OWNER", "ADMIN", "MEMBER", "VIEWER"]);
+
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
   // Use activeWorkspaceId (Multi-tenancy Refactor)
@@ -44,10 +46,13 @@ export async function POST(req: Request) {
 
   const body = await req.json();
   const email = body?.email?.toLowerCase().trim();
-  const role = body?.role || "MEMBER"; // Default to MEMBER enum
+  const role = typeof body?.role === "string" ? body.role.toUpperCase() : "MEMBER";
 
   if (!email) {
     return NextResponse.json({ error: "Email is required" }, { status: 400 });
+  }
+  if (!VALID_ROLES.has(role)) {
+    return NextResponse.json({ error: "Invalid role" }, { status: 422 });
   }
 
   const existingMember = await prisma.workspaceMember.findFirst({
@@ -73,7 +78,7 @@ export async function POST(req: Request) {
   await prisma.workspaceInvite.create({
     data: {
       email,
-      role: role.toUpperCase(), // Ensure Enum match if string passed
+      role: role as "OWNER" | "ADMIN" | "MEMBER" | "VIEWER",
       tokenHash: token, // Schema expects tokenHash
       workspaceId: workspace.id,
       invitedById: session.user.id,

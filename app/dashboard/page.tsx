@@ -14,6 +14,7 @@ import { ReliabilityTable } from "@/components/dashboard/reliability-table";
 import { ClientHealth } from "@/components/dashboard/client-health";
 import { ActivityWidget } from "@/features/dashboard/components/ActivityWidget";
 import { Insights } from "@/components/dashboard/insights";
+import { RecurringPlansSection } from "@/features/automation/components/RecurringPlansSection";
 
 // New Stage Logic Imports (v2)
 import { getDashboardState } from "@/features/dashboard/lib/get-dashboard-state";
@@ -23,6 +24,7 @@ import { WaitingView } from "@/features/dashboard/components/stages/WaitingView"
 import { ActionView } from "@/features/dashboard/components/stages/ActionView";
 import { CelebrationView } from "@/features/dashboard/components/stages/CelebrationView";
 import { InsightsView } from "@/features/dashboard/components/stages/InsightsView";
+import { OverviewV2Section } from "@/features/dashboard/components/OverviewV2Section";
 
 type Props = {
   searchParams: Promise<{ tab?: string }>;
@@ -82,6 +84,8 @@ export default async function DashboardPage({ searchParams }: Props) {
         <div className="min-h-[500px] px-4 sm:px-0">
           {activeTab === "overview" && (
             <div className="space-y-6">
+              <OverviewV2Section />
+
               {/* STRICT STATE MACHINE RENDERING */}
               {dashboardState.stage === "NO_INVOICE_YET" && <SetupView />}
               {dashboardState.stage === "INVOICE_CREATED_BUT_NOT_SENT" && (
@@ -103,6 +107,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           {activeTab === "automation" && (
             <div className="space-y-6">
               <AutomationLifecycle />
+              <RecurringPlansSection compact />
               <RemindersTimeline />
             </div>
           )}

@@ -26,20 +26,35 @@ export async function GET() {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Fetch workspace separately using session ID
+  // Fetch workspace and active membership role using session workspace ID
   let workspace = null;
+  let workspaceRole: string | null = null;
   const workspaceId = (session.user as any).activeWorkspaceId;
   if (workspaceId) {
-    workspace = await prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { id: true, name: true },
-    });
+    const [workspaceRecord, membership] = await Promise.all([
+      prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { id: true, name: true, ownerId: true },
+      }),
+      prisma.workspaceMember.findFirst({
+        where: { workspaceId, userId: session.user.id },
+        select: { role: true },
+      }),
+    ]);
+
+    workspace = workspaceRecord ? { id: workspaceRecord.id, name: workspaceRecord.name } : null;
+    if (membership?.role) {
+      workspaceRole = membership.role;
+    } else if (workspaceRecord?.ownerId === session.user.id) {
+      workspaceRole = "OWNER";
+    }
   }
 
   return NextResponse.json({
     name: user.name,
     email: user.email,
-    role: user.platformRole,
+    role: workspaceRole || user.platformRole,
+    platformRole: user.platformRole,
     image: user.image,
     workspace: workspace,
     // Defaults for legacy fields

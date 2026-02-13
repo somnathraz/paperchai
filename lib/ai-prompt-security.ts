@@ -275,10 +275,10 @@ export const projectDataOutputSchema = z
     client: z
       .object({
         name: z.string().max(255).nullable().optional(), // Can be null if not found
-        company: z.string().max(255).optional(),
-        contactPerson: z.string().max(255).optional(),
-        email: z.string().email().optional(),
-        phone: z.string().max(50).optional(),
+        company: z.string().max(255).nullish(),
+        contactPerson: z.string().max(255).nullish(),
+        email: z.string().email().nullish(),
+        phone: z.string().max(50).nullish(),
         address: z
           .union([
             z.string().max(500),
@@ -288,50 +288,48 @@ export const projectDataOutputSchema = z
               country: z.string().max(100).optional(),
             }),
           ])
-          .optional(),
+          .nullish(),
       })
       .optional(),
-    projects: z
-      .array(
-        z.object({
-          name: z.string().max(255),
-          description: z.string().max(5000).optional(),
-          scope: z.string().max(2000).optional(),
-          type: z.enum(["RETAINER", "FIXED", "HOURLY", "MILESTONE"]).optional(),
-          billingStrategy: z
-            .enum(["PER_MILESTONE", "SINGLE_INVOICE", "RETAINER_MONTHLY", "HOURLY_TIMESHEET"])
-            .optional(),
-          totalBudget: z.number().min(0).optional(),
-          currency: z.string().max(10).optional(),
-          startDate: z.string().optional(),
-          endDate: z.string().optional(),
-          milestones: z
-            .array(
-              z.object({
-                title: z.string().max(255),
-                description: z.string().max(1000).optional(),
-                amount: z.number().min(0),
-                expectedDate: z.string().optional(),
-                dueDate: z.string().optional(),
-                orderIndex: z.number().optional(),
-              })
-            )
-            .optional(),
-        })
-      )
-      .min(1),
+    projects: z.array(
+      z.object({
+        name: z.string().max(255),
+        description: z.string().max(5000).optional(),
+        scope: z.string().max(2000).optional(),
+        type: z.enum(["RETAINER", "FIXED", "HOURLY", "MILESTONE"]).optional(),
+        billingStrategy: z
+          .enum(["PER_MILESTONE", "SINGLE_INVOICE", "RETAINER_MONTHLY", "HOURLY_TIMESHEET"])
+          .optional(),
+        totalBudget: z.number().min(0).optional(),
+        currency: z.string().max(10).optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        milestones: z
+          .array(
+            z.object({
+              title: z.string().max(255),
+              description: z.string().max(1000).optional(),
+              amount: z.number().min(0),
+              expectedDate: z.string().optional(),
+              dueDate: z.string().optional(),
+              orderIndex: z.number().optional(),
+            })
+          )
+          .optional(),
+      })
+    ),
     confidence: z
       .union([
         z.number().min(0).max(1), // Legacy single confidence value
         z.object({
-          client: z.number().min(0).max(1).optional(),
-          project: z.number().min(0).max(1).optional(),
-          projects: z.number().min(0).max(1).optional(), // Alias for project
-          milestones: z.number().min(0).max(1).optional(),
+          client: z.number().min(0).max(1).nullish(),
+          project: z.number().min(0).max(1).nullish(),
+          projects: z.number().min(0).max(1).nullish(), // Alias for project
+          milestones: z.number().min(0).max(1).nullish(),
         }),
       ])
       .optional(),
-    warnings: z.array(z.string().max(500)).optional(),
+    warnings: z.array(z.string().max(500)).optional().nullable(),
   })
   .or(projectDataOutputSchemaLegacy); // Allow legacy format for backward compatibility
 
@@ -411,9 +409,17 @@ OUTPUT RULES:
 
 SCHEMA: {"items": [{"title": string, "quantity": number, "rate": number}], "confidence": 0-1}`,
 
-  extract_project_data: `You are an expert at extracting business data from contracts, agreements, and proposals.
+  extract_project_data: `You are an expert at extracting business data from contracts, agreements, SOWs, and proposals.
 
 Your job is to extract ALL relevant information for creating a Project with Milestones.
+
+SERVICE AGREEMENTS & CONTRACTS: The project is often in a section titled "1. PROJECT DETAILS", "Project Details", or "Scope". Look for:
+- "Project Name: X" or "Project Title: X"
+- "Total Project Fee", "Total Fee", "Total Budget", "Contract Value" (e.g. "₹3,20,000" or "INR 320000")
+- "Start Date", "Effective Date", "Target Go-Live Date", "End Date"
+- "Milestone Summary", "M1", "M2", "M3", "M4" with Work Period, Payment %, Amount (₹)
+- Tables with "Milestone", "Amount", "Payment", "Work Period", "Due Date"
+You MUST return at least one project in the "projects" array when the document describes a project, scope of work, or milestones. Never return projects: [] if such information exists.
 
 EXTRACT THE FOLLOWING:
 1. CLIENT INFO: Look in the agreement header/parties section for:
@@ -521,6 +527,7 @@ OUTPUT RULES:
 - CLIENT NAME: Extract it ONLY if explicitly stated in the document (any name is acceptable: "abc", "xyz", "Company Name", etc.)
 - CLIENT NAME: Return null if only the label "Client" appears without an actual name value
 - If client email/name is clearly stated, extract it - don't return null
+- If no projects found, return {"projects": [], "confidence": {"client": 0, "project": 0, "milestones": 0}}
 - Remove markdown formatting (**, *, _) from extracted text
 
 SCHEMA:
@@ -613,9 +620,15 @@ export interface ProcessedAiInput {
  * Process input for AI - sanitize, assess risk, prepare prompts.
  * The action is ENDPOINT-DEFINED, never from user input.
  */
+/** Per-action max content length (chars). extract_project_data needs long contracts/SOWs. */
+const ACTION_MAX_LENGTH: Partial<Record<AiAction, number>> = {
+  extract_project_data: 50000,
+};
+
 export function processAiInput(content: string, context: AiSecurityContext): ProcessedAiInput {
-  // 1. Sanitize content
-  const sanitizedContent = sanitizeForLlm(content);
+  // 1. Sanitize content (use larger limit for project extraction so PROJECT DETAILS + milestones aren't cut)
+  const maxLen = ACTION_MAX_LENGTH[context.action] ?? 8000;
+  const sanitizedContent = sanitizeForLlm(content, maxLen);
 
   // 2. Hash for caching
   const contentHash = hashContent(sanitizedContent, context.action);
@@ -671,8 +684,13 @@ export function validateAiOutput<T>(
     return { success: true, data: validated };
   } catch (error) {
     if (error instanceof z.ZodError) {
+      console.warn("[AI Validation] Schema validation failed:", {
+        errors: error.issues.map((e: z.ZodIssue) => `${e.path.join(".")}: ${e.message}`),
+        outputSnippet: output.substring(0, 200) + (output.length > 200 ? "..." : ""),
+      });
       return { success: false, error: `Validation failed: ${error.message}` };
     }
+    console.error("[AI Validation] Invalid JSON output:", output.substring(0, 500));
     return { success: false, error: "Invalid JSON output from AI" };
   }
 }

@@ -20,6 +20,7 @@ import { requirePremium, checkDailyImportLimit } from "@/lib/middleware/premium-
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { getUserTier } from "@/lib/tier-limits";
 import { notionImportSchema, sanitizeJson } from "@/lib/validation/integration-schemas";
+import { resolveIntegrationWorkspace, requireIntegrationManager } from "@/lib/integrations/access";
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,10 +42,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: rateLimit.error }, { status: 429 });
     }
 
-    // 4. Get workspace ID
-    const workspaceId = (session.user as any).activeWorkspaceId;
-    if (!workspaceId) {
+    // 4. Resolve workspace from DB
+    const workspace = await resolveIntegrationWorkspace(session.user.id, session.user.name);
+    if (!workspace) {
       return NextResponse.json({ error: "No active workspace" }, { status: 400 });
+    }
+    const workspaceId = workspace.id;
+    const canManage = await requireIntegrationManager(session.user.id, workspaceId);
+    if (!canManage) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // 5. Check daily import limit
@@ -151,20 +157,20 @@ export async function POST(request: NextRequest) {
           : "";
 
         // Call AI extraction
-        const aiResponse = await fetch(
-          `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/ai/notion/extract`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              properties,
-              textContent,
-              importType,
-              workspaceId,
-              importId: notionImport.id,
-            }),
-          }
-        );
+        const aiResponse = await fetch(new URL("/api/ai/notion/extract", request.url), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: request.headers.get("cookie") || "",
+          },
+          body: JSON.stringify({
+            properties,
+            textContent,
+            importType,
+            workspaceId,
+            importId: notionImport.id,
+          }),
+        });
 
         const aiResult = await aiResponse.json();
 

@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { resolveIntegrationWorkspace, requireIntegrationManager } from "@/lib/integrations/access";
 
 // Schema for creating from analysis
 const createSchema = z.object({
@@ -21,9 +21,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+    const workspace = await resolveIntegrationWorkspace(session.user.id, session.user.name);
     if (!workspace) {
       return NextResponse.json({ error: "No active workspace" }, { status: 400 });
+    }
+    const canManage = await requireIntegrationManager(session.user.id, workspace.id);
+    if (!canManage) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const body = await request.json();

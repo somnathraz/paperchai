@@ -58,6 +58,7 @@ export interface SlackIntegration extends IntegrationDetails {
 
 export interface IntegrationStatus {
   success: boolean;
+  canManageIntegrations?: boolean;
   tier?: string;
   integrationsEnabled?: boolean;
   limits?: {

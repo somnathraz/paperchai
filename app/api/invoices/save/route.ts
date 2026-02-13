@@ -5,6 +5,37 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import { z } from "zod";
+import { isValidInvoiceDateOrder } from "@/lib/invoices/workflow-validation";
+
+const saveInvoiceSchema = z.object({
+  id: z.string().cuid().optional(),
+  clientId: z.string().cuid().optional(),
+  projectId: z.string().cuid().optional().nullable(),
+  templateSlug: z.string().max(100).optional(),
+  sections: z.any().optional(),
+  number: z.string().max(100).optional(),
+  issueDate: z.string().datetime().optional(),
+  dueDate: z.string().datetime().optional(),
+  currency: z.string().length(3).optional(),
+  notes: z.string().max(5000).optional(),
+  terms: z.string().max(5000).optional(),
+  reminderTone: z.string().max(100).optional(),
+  reminderCadence: z.any().optional(),
+  fontFamily: z.string().max(100).optional(),
+  primaryColor: z.string().max(20).optional(),
+  accentColor: z.string().max(20).optional(),
+  backgroundColor: z.string().max(20).optional(),
+  gradientFrom: z.string().max(20).optional(),
+  gradientTo: z.string().max(20).optional(),
+  paymentTermOption: z.string().max(50).optional(),
+  attachments: z.array(z.any()).max(20).optional(),
+  items: z.array(z.any()).max(100).optional(),
+  adjustments: z.array(z.any()).max(50).optional(),
+  taxSettings: z.any().optional(),
+  layoutDensity: z.string().max(20).optional(),
+  showBorder: z.boolean().optional(),
+});
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -13,7 +44,11 @@ export async function POST(req: Request) {
   const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
   if (!workspace) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
 
-  const body = await req.json();
+  const parsed = saveInvoiceSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid request payload" }, { status: 422 });
+  }
+  const body = parsed.data;
   const {
     id,
     clientId: providedClientId,
@@ -51,6 +86,36 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invoice number is required" }, { status: 400 });
   }
 
+  const issueDateObj = issueDate ? new Date(issueDate) : undefined;
+  const dueDateObj = dueDate ? new Date(dueDate) : undefined;
+  if (!isValidInvoiceDateOrder(issueDateObj, dueDateObj)) {
+    return NextResponse.json(
+      { error: "Due date cannot be earlier than issue date" },
+      { status: 422 }
+    );
+  }
+
+  const duplicateWhere = id
+    ? {
+        workspaceId: workspace.id,
+        number: invoiceNumber,
+        NOT: { id },
+      }
+    : {
+        workspaceId: workspace.id,
+        number: invoiceNumber,
+      };
+  const duplicateInvoice = await prisma.invoice.findFirst({
+    where: duplicateWhere,
+    select: { id: true },
+  });
+  if (duplicateInvoice) {
+    return NextResponse.json(
+      { error: "Invoice number already exists in this workspace" },
+      { status: 409 }
+    );
+  }
+
   // If no client is provided, we need to create a placeholder or use a default
   let clientId = providedClientId;
   if (!clientId) {
@@ -81,7 +146,7 @@ export async function POST(req: Request) {
   }
 
   const template = templateSlug
-    ? await prisma.invoiceTemplate.findUnique({
+    ? await prisma.invoiceTemplate.findFirst({
         where: { slug: templateSlug },
         select: { id: true },
       })
@@ -142,8 +207,8 @@ export async function POST(req: Request) {
     templateId: template?.id,
     number: invoiceNumber,
     status: "draft" as const,
-    issueDate: issueDate ? new Date(issueDate) : undefined,
-    dueDate: dueDate ? new Date(dueDate) : undefined,
+    issueDate: issueDateObj,
+    dueDate: dueDateObj,
     currency: currency || "INR",
     notes: notes || null,
     terms: terms || null,
@@ -198,37 +263,47 @@ export async function POST(req: Request) {
     data.sendMeta = Object.keys(merged).length > 0 ? (merged as any) : undefined;
   }
 
-  const upserted = await prisma.invoice.upsert({
-    where: { id: id || "" },
-    update: {
-      ...data,
-      items: {
-        deleteMany: {},
-        create: items.map((item: any) => ({
-          title: item.title,
-          description: item.description,
-          quantity: item.quantity ?? 1,
-          unitPrice: item.unitPrice ?? 0,
-          taxRate: item.taxRate ?? 0,
-          total: item.total ?? 0,
-        })),
+  const itemCreates = items.map((item: any) => ({
+    title: item.title,
+    description: item.description,
+    quantity: item.quantity ?? 1,
+    unitPrice: item.unitPrice ?? 0,
+    taxRate: item.taxRate ?? 0,
+    total: item.total ?? 0,
+  }));
+
+  let upserted;
+  if (id) {
+    const existing = await prisma.invoice.findFirst({
+      where: { id, workspaceId: workspace.id },
+      select: { id: true },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
+
+    upserted = await prisma.invoice.update({
+      where: { id },
+      data: {
+        ...data,
+        items: {
+          deleteMany: {},
+          create: itemCreates,
+        },
       },
-    },
-    create: {
-      ...data,
-      items: {
-        create: items.map((item: any) => ({
-          title: item.title,
-          description: item.description,
-          quantity: item.quantity ?? 1,
-          unitPrice: item.unitPrice ?? 0,
-          taxRate: item.taxRate ?? 0,
-          total: item.total ?? 0,
-        })),
+      include: { items: true },
+    });
+  } else {
+    upserted = await prisma.invoice.create({
+      data: {
+        ...data,
+        items: {
+          create: itemCreates,
+        },
       },
-    },
-    include: { items: true },
-  });
+      include: { items: true },
+    });
+  }
 
   return NextResponse.json({ invoice: upserted });
 }

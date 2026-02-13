@@ -66,7 +66,17 @@ export async function GET(request: NextRequest) {
         });
       }
 
-      return NextResponse.json({ error: "Failed to fetch databases" }, { status: 500 });
+      const isPermissionIssue =
+        response.error === "unauthorized" || response.error === "restricted_resource";
+      return NextResponse.json(
+        {
+          error: isPermissionIssue
+            ? "Notion permission issue. Reconnect and ensure databases/pages are shared with the integration."
+            : "Failed to fetch databases from Notion.",
+          notionError: response.error,
+        },
+        { status: isPermissionIssue ? 403 : 500 }
+      );
     }
 
     // 8. Transform response
@@ -80,6 +90,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       databases,
+      count: databases.length,
+      guidance:
+        databases.length === 0
+          ? "No shared Notion databases found. In Notion, share the database with your integration, then refresh."
+          : null,
       workspaceName: connection.providerWorkspaceName,
     });
   } catch (error) {

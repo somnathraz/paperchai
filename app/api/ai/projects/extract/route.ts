@@ -90,6 +90,19 @@ export async function POST(req: NextRequest) {
     } else if (isBase64 && fileData) {
       // Decode base64 and extract text
       const buffer = Buffer.from(fileData, "base64");
+
+      // --- R2 Upload ---
+      try {
+        console.log(`[AI Extract] Uploading file to R2: ${fileMeta.fileKey}`);
+        const { uploadFile } = await import("@/lib/r2");
+        await uploadFile(fileMeta.fileKey, buffer, fileMeta.mimeType);
+        console.log(`[AI Extract] R2 upload successful`);
+      } catch (uploadError) {
+        console.error(`[AI Extract] R2 upload failed:`, uploadError);
+        // Continue with extraction even if upload fails, or fail?
+        // User asked to "keep project document in upload in r2", so maybe warn but proceed.
+      }
+
       const extraction = await extractTextFromBuffer(
         buffer,
         fileMeta.mimeType,
@@ -120,6 +133,13 @@ export async function POST(req: NextRequest) {
       // Fallback for testing
       textContent = "Contract for Website Redesign with Acme Corp. Total budget $5000.";
     }
+
+    // === VERBOSE LOGGING FOR DEBUGGING ===
+    console.log(`[AI Extract] Text extraction complete:`, {
+      filename: fileMeta.fileName,
+      textLength: textContent.length,
+      snippet: textContent.substring(0, 300) + (textContent.length > 300 ? "..." : ""),
+    });
 
     // 6. Process through security layer
     const securityContext = {
@@ -207,7 +227,7 @@ export async function POST(req: NextRequest) {
       try {
         const legacyExtract = JSON.parse(cleanText);
 
-        // Clean invalid client names in legacy format (only filter label words, accept any actual names)
+        // Clean invalid client names in legacy format
         if (legacyExtract.client?.name) {
           const invalidNames = [
             "client",
@@ -233,15 +253,36 @@ export async function POST(req: NextRequest) {
             "PARTIES",
           ];
           const clientName = legacyExtract.client.name.trim();
-          // Only reject label words - accept any other name (abc, xyz, etc.)
           if (invalidNames.includes(clientName)) {
-            console.warn(
-              "[AI Extract] Invalid client name detected (label word), setting to null:",
-              clientName
-            );
             legacyExtract.client.name = null;
           }
         }
+
+        // --- NORMALIZATION: Convert legacy/singular/empty formats to projects array ---
+        if (!legacyExtract.projects || legacyExtract.projects.length === 0) {
+          if (
+            legacyExtract.project &&
+            typeof legacyExtract.project === "object" &&
+            "name" in legacyExtract.project
+          ) {
+            legacyExtract.projects = [legacyExtract.project];
+          } else if (legacyExtract.name) {
+            legacyExtract.projects = [
+              {
+                name: legacyExtract.name,
+                description: legacyExtract.description,
+                scope: legacyExtract.scope,
+                totalBudget: legacyExtract.budget,
+                startDate: legacyExtract.timeline?.startDate,
+                endDate: legacyExtract.timeline?.endDate,
+              },
+            ];
+          }
+        }
+
+        console.log(
+          `[AI Extract] Fallback successful. Projects found: ${legacyExtract.projects?.length || 0}`
+        );
 
         // Persist result
         await prisma.projectDocument.create({
@@ -255,7 +296,7 @@ export async function POST(req: NextRequest) {
             sourceType: "OTHER",
             aiStatus: "PROCESSED",
             aiExtract: legacyExtract,
-            aiSummary: `Extracted ${legacyExtract.projects?.length || 1} project(s)`,
+            aiSummary: `Extracted ${legacyExtract.projects?.length || 0} project(s) (via fallback)`,
             createdByUserId: session.user.id,
           },
         });
@@ -320,19 +361,28 @@ export async function POST(req: NextRequest) {
       // Accept any other name, no matter how short or unusual - as long as it's not a label word
     }
 
-    // Ensure projects array exists (handle legacy single project format)
-    if (!extract.projects && extract.name) {
-      // Convert legacy format to new format
-      extract.projects = [
-        {
-          name: extract.name,
-          description: extract.description,
-          scope: extract.scope,
-          totalBudget: extract.budget,
-          startDate: extract.timeline?.startDate,
-          endDate: extract.timeline?.endDate,
-        },
-      ];
+    // Ensure projects array exists (handle legacy, singular project, or AI returning projects: [])
+    if (!extract.projects || extract.projects.length === 0) {
+      const raw = extract as Record<string, unknown>;
+      if (
+        raw.project &&
+        typeof raw.project === "object" &&
+        raw.project !== null &&
+        "name" in raw.project
+      ) {
+        extract.projects = [raw.project as (typeof extract.projects)[0]];
+      } else if (extract.name) {
+        extract.projects = [
+          {
+            name: extract.name,
+            description: extract.description,
+            scope: extract.scope,
+            totalBudget: extract.budget,
+            startDate: extract.timeline?.startDate,
+            endDate: extract.timeline?.endDate,
+          } as (typeof extract.projects)[0],
+        ];
+      }
     }
 
     await prisma.projectDocument.create({

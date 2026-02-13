@@ -91,11 +91,15 @@ export type InvoiceFormState = {
   };
 
   automationApproval?: {
-    status: "PENDING" | "APPROVED";
+    status: "PENDING" | "APPROVED" | "REJECTED";
     requestedAt?: string;
     approvedAt?: string;
+    rejectedAt?: string;
+    rejectionReason?: string;
     scheduledSendAt?: string;
     ruleId?: string;
+    escalationCount?: number;
+    lastEscalatedAt?: string;
   };
 
   // Tax configuration

@@ -88,19 +88,52 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     });
 
     // --- Auto-Invoice Logic ---
+    console.log(
+      `[CreateProject] AutoInvoice Check: Enabled=${project.autoInvoiceEnabled}, Milestones=${project.milestones?.length}`
+    );
     if (project.autoInvoiceEnabled && project.milestones && project.milestones.length > 0) {
       let eligibleMilestones = project.milestones.filter(
         (m) => m.billingTrigger === "ON_CREATION" && m.autoInvoiceEnabled
       );
 
+      console.log(
+        `[CreateProject] Eligible 'ON_CREATION' Milestones: ${eligibleMilestones.length}`
+      );
+
       // Fallback: If no "Immediate" milestones found but Auto-Invoice is ON,
       // assume the user wants the first milestone (e.g. Deposit) drafted immediately.
       if (eligibleMilestones.length === 0 && project.milestones.length > 0) {
+        console.log(`[CreateProject] Fallback to first milestone for auto-invoice`);
         eligibleMilestones = [project.milestones[0]];
       }
 
       for (const m of eligibleMilestones) {
+        console.log(`[CreateProject] Generating invoice for milestone: ${m.title} (${m.id})`);
         await generateInvoiceForMilestone(workspace.id, clientId, project.id, m);
+      }
+    }
+
+    // --- Link Source Document (if any) ---
+    if (body.sourceDocument) {
+      try {
+        await prisma.projectDocument.create({
+          data: {
+            workspaceId: workspace.id,
+            clientId: clientId,
+            projectId: project.id,
+            fileKey: body.sourceDocument.fileKey,
+            fileName: body.sourceDocument.fileName,
+            mimeType: body.sourceDocument.mimeType,
+            size: body.sourceDocument.size || 0,
+            sourceType: "CONTRACT", // Assume contract/brief for initial upload
+            aiStatus: "PROCESSED", // It was already processed by AI Wizard
+            createdByUserId: session.user.id,
+          },
+        });
+        console.log(`[CreateProject] Linked source document: ${body.sourceDocument.fileName}`);
+      } catch (docError) {
+        console.error("Failed to link source document:", docError);
+        // Monitoring would catch this, but don't fail the project creation
       }
     }
 

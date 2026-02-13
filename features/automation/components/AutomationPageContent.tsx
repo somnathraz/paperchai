@@ -12,6 +12,7 @@ import { RecentActivitySection } from "@/features/automation/components/RecentAc
 import { TemplateEditorDrawer } from "@/features/automation/components/TemplateEditorDrawer";
 import { AutomationWizard } from "@/features/automation/components/AutomationWizard";
 import { AutomationSuggestions } from "@/features/automation/components/AutomationSuggestions";
+import { RecurringPlansSection } from "@/features/automation/components/RecurringPlansSection";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -204,6 +205,79 @@ export function AutomationPageContent() {
         channel: preferredChannel,
       };
     });
+  };
+
+  // Build steps based on trigger type - different triggers have different workflows
+  const buildStepsForTrigger = (
+    trigger: string,
+    sequence: string,
+    channels: string[] = []
+  ): AutomationStep[] => {
+    const preferredChannel = (channels.find(
+      (channel) => channel === "email" || channel === "whatsapp" || channel === "slack"
+    ) || "email") as AutomationStep["channel"];
+
+    // Get the sequence-based reminder steps (with day intervals like T-3d, T+7d)
+    const reminderSteps = buildSteps(sequence, channels);
+
+    switch (trigger) {
+      case "NOTION_STATUS_CHANGE":
+        // Notion trigger: Create invoice first, then apply reminder sequence
+        return [
+          {
+            timing: "On Trigger",
+            channel: preferredChannel,
+            template: "📥 Notion status detected",
+          },
+          { timing: "Immediate", channel: preferredChannel, template: "📝 Draft invoice created" },
+          ...reminderSteps.map((step) => ({
+            ...step,
+            template: `📧 ${step.template}`,
+          })),
+        ];
+      case "MILESTONE_DUE":
+        // Milestone trigger: Create invoice, then apply reminder sequence
+        return [
+          {
+            timing: "On Due",
+            channel: preferredChannel,
+            template: "🎯 Milestone due date reached",
+          },
+          { timing: "Immediate", channel: preferredChannel, template: "📝 Invoice generated" },
+          ...reminderSteps.map((step) => ({
+            ...step,
+            template: `📧 ${step.template}`,
+          })),
+        ];
+      case "PROJECT_STARTED":
+        // Project trigger: Configure reminders with sequence timings
+        return [
+          { timing: "On Create", channel: preferredChannel, template: "🚀 Project created" },
+          ...reminderSteps.map((step) => ({
+            ...step,
+            template: `⏰ ${step.template} (scheduled)`,
+          })),
+        ];
+      case "SLACK_THREAD_TAG":
+        // Slack trigger: Identify client, then apply reminder sequence
+        return [
+          { timing: "On Tag", channel: "slack", template: "💸 Thread tagged" },
+          { timing: "Immediate", channel: preferredChannel, template: "👤 Client identified" },
+          ...reminderSteps.map((step) => ({
+            ...step,
+            template: `📧 ${step.template}`,
+          })),
+        ];
+      case "INVOICE_OVERDUE":
+        // Invoice overdue: Pure reminder sequence
+        return reminderSteps;
+      default:
+        // Default: Show the reminder sequence
+        return [
+          { timing: "On Trigger", channel: preferredChannel, template: "⚡ Automation triggered" },
+          ...reminderSteps,
+        ];
+    }
   };
 
   const buildLinkedTemplates = (sequence: string) => {
@@ -490,8 +564,8 @@ export function AutomationPageContent() {
 
       // Map recipe ID to trigger enum
       const triggerMap: Record<string, string> = {
-        "notion-invoice-draft": "NOTION_STATUS_CHANGE",
-        "slack-overdue-nudge": "SLACK_THREAD_TAG",
+        "notion-invoice-draft": "MILESTONE_DUE",
+        "slack-overdue-nudge": "INVOICE_OVERDUE",
       };
 
       // Map scope to backend enum
@@ -521,7 +595,7 @@ export function AutomationPageContent() {
 
       const createPayload = {
         ...payload,
-        trigger: triggerMap[config.recipeId] || config.trigger || "PROJECT_STARTED",
+        trigger: triggerMap[config.recipeId] || config.trigger || "INVOICE_OVERDUE",
         status: "PENDING",
       };
 
@@ -643,9 +717,11 @@ export function AutomationPageContent() {
         channels: selectedAutomation.channels || [],
         createdBy: "You",
         createdAt: selectedAutomation.createdAt,
-        steps: isReminderAutomation
-          ? buildSteps(selectedAutomation.sequence, selectedAutomation.channels)
-          : [],
+        steps: buildStepsForTrigger(
+          selectedAutomation.trigger,
+          selectedAutomation.sequence,
+          selectedAutomation.channels
+        ),
         linkedTemplates: isReminderAutomation
           ? buildLinkedTemplates(selectedAutomation.sequence)
           : [],
@@ -682,6 +758,8 @@ export function AutomationPageContent() {
         }}
         onViewDetails={(id) => setSelectedAutomationId(id)}
       />
+
+      <RecurringPlansSection />
 
       <AutomationSuggestions />
 

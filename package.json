@@ -12,8 +12,17 @@
     "test:email": "node scripts/run-test-email.js",
     "test:draft-reminders": "curl -X POST http://localhost:3000/api/invoices/draft-reminders -H 'Content-Type: application/json' -d '{\"forceAll\": true}'",
     "test:scheduled-invoices": "curl -X POST http://localhost:3000/api/internal/scheduled-invoices/run",
+    "cron:automation": "curl -X POST http://localhost:3000/api/internal/automation/run",
     "cron:reminders": "curl -X POST http://localhost:3000/api/internal/reminders/run",
     "cron:scheduled": "curl -X POST http://localhost:3000/api/internal/scheduled-invoices/run",
+    "cron:approval-escalation": "curl -X POST http://localhost:3000/api/internal/approvals/escalate",
+    "cron:recurring": "curl -X POST http://localhost:3000/api/internal/recurring-invoices/run",
+    "test:auth-contract": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/auth-contract.test.ts",
+    "test:slack-commands": "node scripts/smoke-slack-commands.js",
+    "db:list-users": "node scripts/list-users-and-access.js",
+    "test:slack": "npm run test:slack-unit && npm run test:slack-commands",
+    "test:slack-unit": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/slack-command-parser.test.ts && ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/slack-validation.test.ts && ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/slack-signature.test.ts",
+    "ngrok": "ngrok http 3000",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -27,6 +36,8 @@
     ]
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.975.0",
+    "@aws-sdk/s3-request-presigner": "^3.975.0",
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^5.19.1",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -60,6 +71,7 @@
     "next-auth": "^4.24.13",
     "nodemailer": "^7.0.11",
     "openai": "^6.15.0",
+    "pdf-parse": "^1.1.1",
     "prisma": "^5.19.1",
     "puppeteer": "^24.32.0",
     "react": "^18.3.1",

@@ -1,9 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
-
-const getBaseUrl = () => {
-  return process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-};
+import { getWorkspaceApprovers } from "@/lib/invoices/approval-routing";
+import { buildAppUrl } from "@/lib/app-url";
 
 const formatCurrency = (amount: number, currency: string) => {
   try {
@@ -31,31 +29,32 @@ export async function sendAutomationApprovalEmail(invoiceId: string) {
     where: { id: invoiceId },
     include: {
       client: { select: { name: true } },
-      workspace: {
-        include: {
-          owner: { select: { name: true, email: true } },
-        },
-      },
+      workspace: true,
     },
   });
 
-  if (!invoice?.workspace?.owner?.email) {
+  if (!invoice) {
     return false;
   }
 
-  const ownerName =
-    invoice.workspace.owner.name || invoice.workspace.owner.email.split("@")[0] || "there";
+  const approvers = await getWorkspaceApprovers(invoice.workspaceId);
+  if (approvers.length === 0) {
+    return false;
+  }
+
+  const primaryApprover = approvers[0];
+  const primaryName = primaryApprover.name || primaryApprover.email.split("@")[0] || "there";
   const total = typeof invoice.total === "object" ? Number(invoice.total) : invoice.total;
   const amountLabel = formatCurrency(Number(total || 0), invoice.currency || "INR");
   const dueLabel = formatDate(invoice.dueDate);
-  const approvalUrl = `${getBaseUrl()}/invoices/new?id=${invoice.id}`;
+  const approvalUrl = buildAppUrl(`/invoices/new?id=${invoice.id}`);
 
   const html = `
         <div style="font-family: Arial, sans-serif; padding: 24px; background: #f8fafc;">
             <div style="max-width: 640px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 24px; border: 1px solid #e2e8f0;">
                 <h2 style="margin: 0 0 12px; color: #0f172a;">Invoice approval needed</h2>
                 <p style="margin: 0 0 16px; color: #475569;">
-                    Hi ${ownerName}, an invoice was created by automation and needs your approval before it is sent.
+                    Hi ${primaryName}, an invoice was created by automation and needs approval before it is sent.
                 </p>
                 <div style="padding: 16px; border-radius: 10px; background: #f1f5f9; margin-bottom: 16px;">
                     <p style="margin: 0 0 6px; color: #0f172a; font-weight: 600;">Invoice ${invoice.number}</p>
@@ -67,16 +66,88 @@ export async function sendAutomationApprovalEmail(invoiceId: string) {
                     Review and approve
                 </a>
                 <p style="margin: 16px 0 0; color: #94a3b8; font-size: 12px;">
-                    Once approved, automation will continue based on the scheduled send time.
+                    Sent to ${approvers.length} approver${approvers.length > 1 ? "s" : ""}. Once approved, automation continues based on schedule.
                 </p>
             </div>
         </div>
     `;
 
-  return sendEmail({
-    to: invoice.workspace.owner.email,
-    subject: `Approval needed: Invoice ${invoice.number}`,
-    html,
-    from: invoice.workspace.registeredEmail || undefined,
+  let sentCount = 0;
+  for (const approver of approvers) {
+    const sent = await sendEmail({
+      to: approver.email,
+      subject: `Approval needed: Invoice ${invoice.number}`,
+      html,
+      from: invoice.workspace.registeredEmail || undefined,
+    });
+    if (sent) sentCount += 1;
+  }
+
+  return sentCount > 0;
+}
+
+type EscalationOptions = {
+  ageHours: number;
+  escalationCount: number;
+};
+
+export async function sendAutomationApprovalEscalationEmail(
+  invoiceId: string,
+  options: EscalationOptions
+) {
+  const invoice = await prisma.invoice.findUnique({
+    where: { id: invoiceId },
+    include: {
+      client: { select: { name: true } },
+      workspace: true,
+    },
   });
+
+  if (!invoice) {
+    return false;
+  }
+
+  const approvers = await getWorkspaceApprovers(invoice.workspaceId);
+  if (approvers.length === 0) {
+    return false;
+  }
+
+  const total = typeof invoice.total === "object" ? Number(invoice.total) : invoice.total;
+  const amountLabel = formatCurrency(Number(total || 0), invoice.currency || "INR");
+  const dueLabel = formatDate(invoice.dueDate);
+  const reviewUrl = buildAppUrl(`/invoices/new?id=${invoice.id}`);
+
+  const html = `
+        <div style="font-family: Arial, sans-serif; padding: 24px; background: #f8fafc;">
+            <div style="max-width: 640px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 24px; border: 1px solid #e2e8f0;">
+                <h2 style="margin: 0 0 12px; color: #7c2d12;">Approval escalation: pending invoice</h2>
+                <p style="margin: 0 0 16px; color: #475569;">
+                    This invoice has been waiting for approval for ${options.ageHours} hour${options.ageHours === 1 ? "" : "s"}.
+                </p>
+                <div style="padding: 16px; border-radius: 10px; background: #fff7ed; margin-bottom: 16px;">
+                    <p style="margin: 0 0 6px; color: #7c2d12; font-weight: 600;">Invoice ${invoice.number}</p>
+                    <p style="margin: 0; color: #9a3412;">Client: ${invoice.client?.name || "Unknown"}</p>
+                    <p style="margin: 0; color: #9a3412;">Amount: ${amountLabel}</p>
+                    <p style="margin: 0; color: #9a3412;">Due: ${dueLabel}</p>
+                    <p style="margin: 8px 0 0; color: #b45309; font-size: 12px;">Escalation #${options.escalationCount}</p>
+                </div>
+                <a href="${reviewUrl}" style="display: inline-block; padding: 12px 18px; background: #ea580c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600;">
+                    Review approval queue
+                </a>
+            </div>
+        </div>
+    `;
+
+  let sentCount = 0;
+  for (const approver of approvers) {
+    const sent = await sendEmail({
+      to: approver.email,
+      subject: `Escalation: Invoice ${invoice.number} still pending approval`,
+      html,
+      from: invoice.workspace.registeredEmail || undefined,
+    });
+    if (sent) sentCount += 1;
+  }
+
+  return sentCount > 0;
 }

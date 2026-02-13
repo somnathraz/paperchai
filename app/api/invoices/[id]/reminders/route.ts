@@ -4,13 +4,36 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { computeSendAt } from "@/lib/reminders";
+import { ensureActiveWorkspace } from "@/lib/workspace";
+import { z } from "zod";
+
+const reminderStepSchema = z.object({
+  index: z.number().int().min(0).max(50),
+  daysBeforeDue: z.number().int().min(0).max(365).optional(),
+  daysAfterDue: z.number().int().min(0).max(365).optional(),
+  offsetFromDueInMinutes: z.number().int().min(-525600).max(525600).optional(),
+  emailTemplateId: z.string().cuid().optional(),
+  templateSlug: z.string().max(100).optional(),
+  notifyCreator: z.boolean().optional(),
+});
+
+const reminderRequestSchema = z.object({
+  enabled: z.boolean(),
+  useDefaults: z.boolean().optional(),
+  steps: z.array(reminderStepSchema).max(10).optional(),
+  presetName: z.string().max(100).optional(),
+});
 
 // GET /api/invoices/[id]/reminders
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+    if (!workspace) {
+      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
 
     const { id } = await params;
@@ -18,19 +41,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { workspace: true },
+      select: { workspaceId: true, remindersEnabled: true },
     });
 
     if (!invoice) {
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
-    // Verify ownership
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    });
-
-    if (!user || user.activeWorkspaceId !== invoice.workspaceId) {
+    if (workspace.id !== invoice.workspaceId) {
       return NextResponse.json({ error: "Unauthorized access to invoice" }, { status: 403 });
     }
 
@@ -55,14 +73,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+    if (!workspace) {
+      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
 
     const { id } = await params;
     const invoiceId = id;
-    const body = await req.json();
-    const { enabled, useDefaults, steps, presetName } = body;
+    const parsed = reminderRequestSchema.parse(await req.json());
+    const { enabled, useDefaults, steps, presetName } = parsed;
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: invoiceId },
@@ -72,11 +94,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    });
-
-    if (!user || user.activeWorkspaceId !== invoice.workspaceId) {
+    if (workspace.id !== invoice.workspaceId) {
       return NextResponse.json({ error: "Unauthorized access to invoice" }, { status: 403 });
     }
 
@@ -110,7 +128,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           enabled: true,
           useDefaults: useDefaults ?? false,
           presetName,
-          createdByUserId: user.id,
+          createdByUserId: session.user.id,
         },
         update: {
           enabled: true,
@@ -182,6 +200,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     return NextResponse.json({ success: true, schedule: result });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: error.issues[0]?.message || "Invalid request payload" },
+        { status: 422 }
+      );
+    }
     console.error("Error updating invoice reminders:", error);
     return NextResponse.json({ error: "Failed to update reminders" }, { status: 500 });
   }

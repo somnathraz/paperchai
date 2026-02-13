@@ -10,6 +10,18 @@ import crypto from "crypto";
 const NOTION_API_BASE = "https://api.notion.com/v1";
 const NOTION_API_VERSION = "2022-06-28";
 
+function getNotionOAuthRedirectUri() {
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
+  return `${appUrl.replace(/\/+$/, "")}/api/integrations/notion/oauth/callback`;
+}
+
+function normalizeNotionObjectId(id: string): string {
+  const compact = (id || "").replace(/-/g, "");
+  if (compact.length !== 32) return id;
+  return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
+}
+
 // ===== Throttle Utility (3 req/sec) =====
 
 let lastRequestTime = 0;
@@ -107,13 +119,8 @@ export async function exchangeCodeForToken(code: string): Promise<{
   const clientId = process.env.NOTION_CLIENT_ID;
   const clientSecret = process.env.NOTION_CLIENT_SECRET;
 
-  // CRITICAL: Must match EXACTLY what was sent in authorize step
-  // Production: https://paperchaiapp.com/api/integrations/notion/oauth/callback
-  // Development: http://localhost:3000/api/integrations/notion/oauth/callback
-  const redirectUri =
-    process.env.NODE_ENV === "production"
-      ? "https://paperchaiapp.com/api/integrations/notion/oauth/callback"
-      : "http://localhost:3000/api/integrations/notion/oauth/callback";
+  // Must match EXACTLY what was sent in authorize step.
+  const redirectUri = getNotionOAuthRedirectUri();
 
   if (!clientId || !clientSecret) {
     throw new Error("Missing Notion OAuth credentials");
@@ -138,6 +145,8 @@ export async function exchangeCodeForToken(code: string): Promise<{
 
   return response.json();
 }
+
+export { getNotionOAuthRedirectUri };
 
 // ===== API Methods =====
 
@@ -185,7 +194,8 @@ export async function queryDatabase(
   const body: any = { page_size: pageSize };
   if (startCursor) body.start_cursor = startCursor;
 
-  const response = await fetch(`${NOTION_API_BASE}/databases/${databaseId}/query`, {
+  const normalizedId = normalizeNotionObjectId(databaseId);
+  const response = await fetch(`${NOTION_API_BASE}/databases/${normalizedId}/query`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,

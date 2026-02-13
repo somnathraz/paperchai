@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
 
 type ApprovalItem = {
   id: string;
@@ -14,6 +15,8 @@ type ApprovalItem = {
   dueDate: string | null;
   requestedAt: string | null;
   scheduledSendAt: string | null;
+  source?: string | null;
+  requestedByExternalId?: string | null;
 };
 
 const formatCurrency = (amount: number, currency: string) => {
@@ -37,6 +40,10 @@ export async function GET() {
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
+      return NextResponse.json({ approvals: [] });
+    }
+    const canApprove = await isWorkspaceApprover(workspace.id, session.user.id);
+    if (!canApprove) {
       return NextResponse.json({ approvals: [] });
     }
 
@@ -66,6 +73,8 @@ export async function GET() {
           scheduledSendAt:
             automation.scheduledSendAt ||
             (invoice.scheduledSendAt ? new Date(invoice.scheduledSendAt).toISOString() : null),
+          source: automation.source || null,
+          requestedByExternalId: automation?.slack?.requestedBySlackUserId || null,
         };
       })
       .filter(Boolean) as ApprovalItem[];

@@ -65,6 +65,7 @@ export function Topbar({ userName, userEmail }: TopbarProps) {
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalItem[]>([]);
   const [approvalsLoading, setApprovalsLoading] = useState(false);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [stage, setStage] = useState<"action" | "client" | "project">("action");
   const [clients, setClients] = useState<
     { id: string; name: string; reliabilityScore?: number; outstanding?: number | null }[]
@@ -143,6 +144,26 @@ export function Topbar({ userName, userEmail }: TopbarProps) {
       toast.error("Failed to approve invoice");
     } finally {
       setApprovingId(null);
+    }
+  };
+
+  const handleRejectInvoice = async (invoiceId: string) => {
+    setRejectingId(invoiceId);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}/reject`, { method: "POST" });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        toast.error(payload.error || "Failed to reject invoice");
+        return;
+      }
+      const payload = await res.json().catch(() => ({}));
+      toast.success(payload.message || "Invoice rejected");
+      await fetchApprovals();
+    } catch (error) {
+      console.error("Failed to reject invoice", error);
+      toast.error("Failed to reject invoice");
+    } finally {
+      setRejectingId(null);
     }
   };
 
@@ -260,6 +281,17 @@ export function Topbar({ userName, userEmail }: TopbarProps) {
                         className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 transition hover:border-amber-300 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {approvingId === approval.id ? "Approving..." : "Approve"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleRejectInvoice(approval.id);
+                        }}
+                        disabled={rejectingId === approval.id}
+                        className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {rejectingId === approval.id ? "Rejecting..." : "Reject"}
                       </button>
                     </div>
                     <span className="text-[11px] text-muted-foreground">

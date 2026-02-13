@@ -1,54 +1,84 @@
 "use server";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { addHours, generateToken, hashToken } from "@/lib/auth-tokens";
+import { generateToken, hashToken } from "@/lib/auth-tokens";
+import { passwordResetRequestSchema } from "@/lib/api-schemas";
+import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
+import { securityConfig } from "@/lib/security/security.config";
+import { buildAppUrl } from "@/lib/app-url";
+import { authPolicy } from "@/lib/security/auth-policy";
+import {
+  checkPersistentAuthRateLimit,
+  checkPersistentEmailCooldown,
+} from "@/lib/security/persistent-auth-throttle";
+import { z } from "zod";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { email } = await req.json();
-    const normalizedEmail = email?.toLowerCase().trim();
-    if (!normalizedEmail) {
-      return NextResponse.json({ error: "Email is required" }, { status: 400 });
+    const rateCheck = await checkPersistentAuthRateLimit(
+      req,
+      "auth",
+      securityConfig.rateLimits.auth.limit,
+      securityConfig.rateLimits.auth.windowMs
+    ).catch(() => checkRateLimitByProfile(req, "auth"));
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: "Too many verification requests. Please try again later." },
+        { status: 429 }
+      );
     }
 
-    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-    if (!user) {
-      return NextResponse.json({ error: "No account found for this email" }, { status: 404 });
+    const parsed = passwordResetRequestSchema.parse(await req.json());
+    const normalizedEmail = parsed.email.toLowerCase().trim();
+    const cooldown = await checkPersistentEmailCooldown(
+      normalizedEmail,
+      "verificationEmail",
+      securityConfig.emailCooldowns.verificationEmail
+    ).catch(() => ({ allowed: true }));
+    if (!cooldown.allowed) {
+      return NextResponse.json(
+        { error: "Please wait before requesting another verification link." },
+        { status: 429 }
+      );
     }
 
-    if (user.emailVerified) {
-      return NextResponse.json({ error: "Email is already verified" }, { status: 400 });
-    }
-
-    // Remove any existing tokens for this user
-    await prisma.verificationToken.deleteMany({ where: { identifier: normalizedEmail } });
-
-    const rawToken = generateToken();
-    const tokenHash = hashToken(rawToken);
-    const expires = addHours(new Date(), 24);
-
-    await prisma.verificationToken.create({
-      data: {
-        identifier: normalizedEmail,
-        token: tokenHash,
-        expires,
-      },
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true, emailVerified: true },
     });
 
-    const baseUrl = process.env.NEXTAUTH_URL || process.env.VERCEL_URL || "http://localhost:3000";
-    const verifyUrl = `${baseUrl}/verify-email?token=${rawToken}`;
+    let verifyUrl: string | undefined;
+    if (user && !user.emailVerified) {
+      await prisma.verificationToken.deleteMany({ where: { identifier: normalizedEmail } });
 
-    if (process.env.NODE_ENV !== "production") {
-      console.log("📨 Resent verification link:", verifyUrl);
+      const rawToken = generateToken();
+      const tokenHash = hashToken(rawToken);
+      const expires = new Date(Date.now() + securityConfig.tokenExpiry.verificationEmail);
+
+      await prisma.verificationToken.create({
+        data: {
+          identifier: normalizedEmail,
+          token: tokenHash,
+          expires,
+        },
+      });
+
+      verifyUrl = buildAppUrl(`/verify-email?token=${rawToken}`);
     }
 
     return NextResponse.json({
       success: true,
-      message: "Verification email sent",
+      message: authPolicy.messages.genericVerify,
       verifyUrl: process.env.NODE_ENV !== "production" ? verifyUrl : undefined,
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: error.issues[0]?.message || "Invalid input" },
+        { status: 422 }
+      );
+    }
     return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
   }
 }

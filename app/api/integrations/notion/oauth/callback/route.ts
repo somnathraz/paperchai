@@ -13,6 +13,8 @@ import { encrypt } from "@/lib/encryption";
 import { verifyOAuthState, exchangeCodeForToken } from "@/lib/notion-client";
 import { notionOAuthCallbackSchema } from "@/lib/validation/integration-schemas";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import { buildSafeAppRedirect } from "@/lib/security/redirect";
+import { requireIntegrationManager } from "@/lib/integrations/access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -74,6 +76,10 @@ export async function GET(request: NextRequest) {
         new URL("/settings/integrations?error=workspace_mismatch", request.url)
       );
     }
+    const canManage = await requireIntegrationManager(session.user.id, workspace.id);
+    if (!canManage) {
+      return NextResponse.redirect(new URL("/settings/integrations?error=forbidden", request.url));
+    }
 
     // 5. Exchange code for token
     const tokenResponse = await exchangeCodeForToken(validated.data.code);
@@ -119,11 +125,13 @@ export async function GET(request: NextRequest) {
     });
 
     // 8. Success - redirect to integrations page or custom URL
-    const redirectUrl = stateData.redirectTo
-      ? `${stateData.redirectTo}?success=notion_connected`
+    const redirectPath = stateData.redirectTo
+      ? `${stateData.redirectTo}${stateData.redirectTo.includes("?") ? "&" : "?"}success=notion_connected`
       : "/settings/integrations?success=notion_connected";
 
-    return NextResponse.redirect(new URL(redirectUrl, request.url));
+    return NextResponse.redirect(
+      buildSafeAppRedirect(request, redirectPath, "/settings/integrations?success=notion_connected")
+    );
   } catch (error) {
     console.error("[Notion OAuth Callback Error]", error);
     return NextResponse.redirect(new URL("/settings/integrations?error=oauth_failed", request.url));

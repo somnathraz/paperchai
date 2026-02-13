@@ -36,8 +36,12 @@ type EditorHeaderProps = {
   aiReviewIssueCount?: number;
   invoiceStatus?: string;
   lastSentAt?: string;
+  canSchedule?: boolean;
+  scheduleDisabledReason?: string;
+  canSend?: boolean;
+  sendDisabledReason?: string;
   hasAutomation?: boolean;
-  approvalStatus?: "PENDING" | "APPROVED";
+  approvalStatus?: "PENDING" | "APPROVED" | "REJECTED";
   onApproveAutomation?: () => void;
 };
 
@@ -50,6 +54,10 @@ export const EditorHeader = memo(function EditorHeader({
   onOpenSendModal,
   invoiceStatus,
   lastSentAt,
+  canSchedule = true,
+  scheduleDisabledReason,
+  canSend = true,
+  sendDisabledReason,
   hasAutomation,
   onAIReview,
   aiReviewIssueCount,
@@ -64,6 +72,7 @@ export const EditorHeader = memo(function EditorHeader({
 
   const isSentToday =
     lastSentAt && new Date(lastSentAt).toDateString() === new Date().toDateString();
+  const isSendDisabled = !!isSentToday || !canSend;
 
   const handleDownloadPdf = async () => {
     if (!invoiceId) return;
@@ -121,6 +130,11 @@ export const EditorHeader = memo(function EditorHeader({
             Approval required
           </span>
         )}
+        {approvalStatus === "REJECTED" && (
+          <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+            Approval rejected
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -163,7 +177,11 @@ export const EditorHeader = memo(function EditorHeader({
           </button>
         )}
         <button
-          onClick={() => setShowScheduleModal(true)}
+          onClick={() => canSchedule && setShowScheduleModal(true)}
+          disabled={!canSchedule}
+          title={
+            canSchedule ? "Schedule invoice" : scheduleDisabledReason || "Scheduling unavailable"
+          }
           className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-white px-4 py-2 text-sm font-medium text-foreground transition hover:border-primary/40 hover:text-primary"
         >
           <Clock className="h-4 w-4" />
@@ -176,13 +194,15 @@ export const EditorHeader = memo(function EditorHeader({
               ? "bg-slate-400 cursor-not-allowed shadow-none"
               : "bg-gradient-to-r from-primary via-emerald-500 to-primary"
           }`}
-          disabled={!!isSentToday}
+          disabled={isSendDisabled}
           title={
             isSentToday
               ? "Invoice already sent today"
-              : hasAutomation
-                ? "Automation configured"
-                : "Send immediately"
+              : !canSend
+                ? sendDisabledReason || "Sending unavailable"
+                : hasAutomation
+                  ? "Automation configured"
+                  : "Send immediately"
           }
         >
           {isSentToday ? (
@@ -265,7 +285,7 @@ export const EditorHeader = memo(function EditorHeader({
             </button>
             <button
               onClick={() => {
-                if (!scheduleDate) return;
+                if (!scheduleDate || !canSchedule) return;
                 // Combine date and time into ISO string
                 const dateTime = new Date(scheduleDate);
                 if (scheduleTime) {
@@ -277,7 +297,7 @@ export const EditorHeader = memo(function EditorHeader({
                 setScheduleDate(undefined);
                 setScheduleTime("");
               }}
-              disabled={!scheduleDate}
+              disabled={!scheduleDate || !canSchedule}
               className="inline-flex items-center justify-center rounded-lg bg-gradient-to-r from-primary via-emerald-500 to-primary px-5 py-2 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] transition hover:shadow-[0_6px_16px_rgba(16,185,129,0.4)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Schedule Invoice

@@ -6,6 +6,22 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { assertLimit, incrementUsage } from "@/lib/usage";
+import { z } from "zod";
+import { isValidInvoiceDateOrder } from "@/lib/invoices/workflow-validation";
+
+const createInvoiceSchema = z.object({
+  clientId: z.string().cuid(),
+  projectId: z.string().cuid().optional().nullable(),
+  templateSlug: z.string().max(100).optional(),
+  number: z.string().max(100),
+  issueDate: z.string().datetime().optional(),
+  dueDate: z.string().datetime().optional(),
+  currency: z.string().length(3).optional(),
+  notes: z.string().max(5000).optional(),
+  terms: z.string().max(5000).optional(),
+  reminderTone: z.string().max(100).optional(),
+  items: z.array(z.any()).max(100).optional(),
+});
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -25,7 +41,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 402 });
   }
 
-  const body = await req.json();
+  const parsed = createInvoiceSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid request payload" }, { status: 422 });
+  }
+  const body = parsed.data;
   const {
     clientId,
     projectId,
@@ -44,8 +64,46 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Client and invoice number are required" }, { status: 400 });
   }
 
+  const issueDateObj = issueDate ? new Date(issueDate) : undefined;
+  const dueDateObj = dueDate ? new Date(dueDate) : undefined;
+  if (!isValidInvoiceDateOrder(issueDateObj, dueDateObj)) {
+    return NextResponse.json(
+      { error: "Due date cannot be earlier than issue date" },
+      { status: 422 }
+    );
+  }
+
+  const duplicateInvoice = await prisma.invoice.findFirst({
+    where: { workspaceId: workspace.id, number },
+    select: { id: true },
+  });
+  if (duplicateInvoice) {
+    return NextResponse.json(
+      { error: "Invoice number already exists in this workspace" },
+      { status: 409 }
+    );
+  }
+
+  const client = await prisma.client.findFirst({
+    where: { id: clientId, workspaceId: workspace.id },
+    select: { id: true },
+  });
+  if (!client) {
+    return NextResponse.json({ error: "Client not found" }, { status: 404 });
+  }
+
+  if (projectId) {
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, workspaceId: workspace.id },
+      select: { id: true },
+    });
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+  }
+
   const template = templateSlug
-    ? await prisma.invoiceTemplate.findUnique({
+    ? await prisma.invoiceTemplate.findFirst({
         where: { slug: templateSlug },
         select: { id: true },
       })
@@ -59,8 +117,8 @@ export async function POST(req: Request) {
       templateId: template?.id,
       number,
       status: "draft",
-      issueDate: issueDate ? new Date(issueDate) : undefined,
-      dueDate: dueDate ? new Date(dueDate) : undefined,
+      issueDate: issueDateObj,
+      dueDate: dueDateObj,
       currency,
       notes,
       terms,

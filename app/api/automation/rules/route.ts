@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { z } from "zod";
 
+const RUNNER_SUPPORTED_TRIGGERS = new Set(["MILESTONE_DUE", "INVOICE_OVERDUE"]);
+
 const createAutomationSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -39,13 +41,6 @@ export async function GET() {
     if (!workspace) {
       return NextResponse.json({ error: "No workspace found" }, { status: 404 });
     }
-
-    // DEBUG: Check if automationRule exists on prisma client
-    console.log(
-      "[DEBUG] Prisma Keys:",
-      Object.keys(prisma).filter((k) => !k.startsWith("_") && !k.startsWith("$"))
-    );
-    console.log("[DEBUG] Has automationRule?", !!(prisma as any).automationRule);
 
     const automations = await prisma.automationRule.findMany({
       where: {
@@ -88,24 +83,27 @@ export async function GET() {
 // POST /api/automation/rules - Create new automation rule
 export async function POST(request: NextRequest) {
   try {
-    console.log("[AUTOMATION_POST] Starting request processing");
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
-      console.log("[AUTOMATION_POST] Unauthorized: No session");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      console.log("[AUTOMATION_POST] No workspace found");
       return NextResponse.json({ error: "No workspace found" }, { status: 404 });
     }
 
-    const body = await request.json();
-    console.log("[AUTOMATION_POST] Received body:", JSON.stringify(body, null, 2));
+    const validated = createAutomationSchema.parse(await request.json());
 
-    const validated = createAutomationSchema.parse(body);
-    console.log("[AUTOMATION_POST] Validation successful. Creating record...");
+    if (!RUNNER_SUPPORTED_TRIGGERS.has(validated.trigger)) {
+      return NextResponse.json(
+        {
+          error: "Trigger is not supported yet",
+          details: `Supported triggers: ${Array.from(RUNNER_SUPPORTED_TRIGGERS).join(", ")}`,
+        },
+        { status: 422 }
+      );
+    }
 
     // Create automation rule
     const automation = await prisma.automationRule.create({
@@ -125,8 +123,6 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    console.log("[AUTOMATION_POST] Created automation:", automation.id);
-
     return NextResponse.json({
       automation: {
         id: automation.id,
@@ -140,7 +136,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      console.error("[AUTOMATION_POST] Validation Error:", JSON.stringify(error.issues, null, 2));
       return NextResponse.json(
         { error: "Invalid request data", details: error.issues },
         { status: 400 }

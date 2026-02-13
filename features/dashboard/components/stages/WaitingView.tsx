@@ -49,7 +49,9 @@ export function WaitingView({ state }: Props) {
         <Button variant="outline" size="sm" asChild className="mt-2">
           <Link
             href={
-              state.meta.latestInvoice ? `/invoices/${state.meta.latestInvoice.id}` : "/invoices"
+              state.meta.latestInvoice
+                ? `/invoices/new?id=${state.meta.latestInvoice.id}`
+                : "/invoices"
             }
           >
             View invoice status
@@ -57,35 +59,28 @@ export function WaitingView({ state }: Props) {
         </Button>
       </div>
 
-      {/* 2. Autopilot Proof Block */}
-      <Card className="p-0 overflow-hidden border-blue-100 bg-blue-50/10">
-        <div className="p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="p-2 bg-blue-100 text-blue-700 rounded-lg mt-1">
-              <CheckCircle2 className="h-5 w-5" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="font-semibold text-lg">Autopilot is active</h3>
-              <p className="text-sm text-muted-foreground">
-                {state.meta.remindersEnabled
-                  ? "We'll send polite reminders if payment is late."
-                  : "Reminders are currently disabled."}
-              </p>
-              {state.meta.remindersEnabled && nextReminder && (
-                <p className="text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-md inline-block mt-1">
-                  Next action scheduled for {nextReminder}
+      {/* 2. Autopilot Proof Block - Only show if reminders are NOT enabled */}
+      {!state.meta.remindersEnabled && (
+        <Card className="p-0 overflow-hidden border-blue-100 bg-blue-50/10">
+          <div className="p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="p-2 bg-blue-100 text-blue-700 rounded-lg mt-1">
+                <CheckCircle2 className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-semibold text-lg">Automate Your Collections</h3>
+                <p className="text-sm text-muted-foreground">
+                  Reminders are currently disabled. Enable them to get paid faster.
                 </p>
-              )}
+              </div>
             </div>
-          </div>
 
-          {!state.meta.remindersEnabled && (
             <Button size="sm" variant="secondary" className="whitespace-nowrap" asChild>
               <Link href="/automation">Enable Reminders</Link>
             </Button>
-          )}
-        </div>
-      </Card>
+          </div>
+        </Card>
+      )}
 
       {/* 3. Recent Activity (Light) */}
       <div className="space-y-4">

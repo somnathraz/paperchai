@@ -209,6 +209,37 @@ export function ModernEditor({
     setTimeout(() => setToast(null), 3000);
   }, []);
 
+  const selectedClient = useMemo(
+    () => (formState.clientId ? clients.find((c) => c.id === formState.clientId) : undefined),
+    [clients, formState.clientId]
+  );
+
+  const selectedProject = useMemo(
+    () => (formState.projectId ? projects.find((p) => p.id === formState.projectId) : undefined),
+    [projects, formState.projectId]
+  );
+
+  const sendScheduleBlocker = useMemo(() => {
+    if (!formState.clientId) return "Select a client before sending or scheduling.";
+    if (!formState.dueDate) return "Set a due date before sending or scheduling.";
+
+    const dueDate = new Date(formState.dueDate);
+    if (Number.isNaN(dueDate.getTime())) return "Set a valid due date before continuing.";
+
+    if (formState.date) {
+      const issueDate = new Date(formState.date);
+      if (!Number.isNaN(issueDate.getTime()) && dueDate.getTime() < issueDate.getTime()) {
+        return "Due date cannot be earlier than issue date.";
+      }
+    }
+
+    if (invoiceStatus === "paid" || invoiceStatus === "cancelled") {
+      return `Invoice is ${invoiceStatus} and cannot be sent or scheduled.`;
+    }
+
+    return null;
+  }, [formState.clientId, formState.dueDate, formState.date, invoiceStatus]);
+
   // Helper to populate invoice items from a project
   const populateItemsFromProject = useCallback(
     (project: any) => {
@@ -369,8 +400,16 @@ export function ModernEditor({
 
   const handleSchedule = useCallback(
     async (payload: any) => {
-      if (!formState.clientId) {
-        showToast("error", "Select a client before scheduling.");
+      if (sendScheduleBlocker) {
+        showToast("error", sendScheduleBlocker);
+        return;
+      }
+      if (invoiceStatus === "sent") {
+        showToast("error", "Invoice already sent. Duplicate scheduling is blocked.");
+        return;
+      }
+      if ((payload.channel === "email" || payload.channel === "both") && !selectedClient?.email) {
+        showToast("error", "Client email is required for email scheduling.");
         return;
       }
       // Auto-generate invoice number if not provided
@@ -450,19 +489,37 @@ export function ModernEditor({
       });
 
       if (scheduleRes.ok) {
+        setInvoiceStatus("scheduled");
         showToast("success", "Invoice scheduled successfully");
       } else {
-        const error = await scheduleRes.json();
+        const error = await scheduleRes.json().catch(() => ({}));
         showToast("error", error.error || "Failed to schedule invoice.");
       }
     },
-    [formState, currentTemplate, sections, savedInvoiceId, showToast]
+    [
+      formState,
+      currentTemplate,
+      sections,
+      savedInvoiceId,
+      sendScheduleBlocker,
+      invoiceStatus,
+      selectedClient?.email,
+      showToast,
+    ]
   );
 
   const handleSend = useCallback(
     async (payload: any) => {
-      if (!formState.clientId) {
-        showToast("error", "Select a client before sending.");
+      if (sendScheduleBlocker) {
+        showToast("error", sendScheduleBlocker);
+        return;
+      }
+      if (invoiceStatus === "sent") {
+        showToast("error", "Invoice already sent.");
+        return;
+      }
+      if ((payload.channel === "email" || payload.channel === "both") && !selectedClient?.email) {
+        showToast("error", "Client email is required for email delivery.");
         return;
       }
       let invoiceId = savedInvoiceId;
@@ -470,7 +527,14 @@ export function ModernEditor({
         const res = await fetch("/api/invoices/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formState),
+          body: JSON.stringify({
+            ...formState,
+            number: formState.number || `DRAFT-${Date.now()}`,
+            templateSlug: currentTemplate,
+            sections,
+            reminderCadence: formState.reminderCadence,
+            attachments: formState.attachments,
+          }),
         });
         if (res.ok) {
           const data = await res.json();
@@ -484,7 +548,14 @@ export function ModernEditor({
       const sendRes = await fetch("/api/invoices/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoiceId, channel: payload.channel }),
+        body: JSON.stringify({
+          invoiceId,
+          channel: payload.channel,
+          idempotencyKey:
+            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        }),
       });
 
       if (sendRes.ok) {
@@ -495,19 +566,33 @@ export function ModernEditor({
         }
         showToast("success", "Invoice sent");
       } else {
-        showToast("error", "Failed to send invoice");
+        const error = await sendRes.json().catch(() => ({}));
+        showToast("error", error.error || "Failed to send invoice");
       }
     },
-    [formState, savedInvoiceId, showToast]
+    [
+      formState,
+      savedInvoiceId,
+      sendScheduleBlocker,
+      invoiceStatus,
+      selectedClient?.email,
+      currentTemplate,
+      sections,
+      showToast,
+    ]
   );
 
   const handleOpenSendModal = useCallback(() => {
-    if (!formState.clientId) {
-      showToast("error", "Please select a client before sending.");
+    if (sendScheduleBlocker) {
+      showToast("error", sendScheduleBlocker);
+      return;
+    }
+    if (invoiceStatus === "sent") {
+      showToast("error", "Invoice already sent.");
       return;
     }
     setSendModalOpen(true);
-  }, [formState.clientId, showToast]);
+  }, [sendScheduleBlocker, invoiceStatus, showToast]);
 
   const handleFormStateChange = useCallback(
     (newState: InvoiceFormState) => {
@@ -530,8 +615,20 @@ export function ModernEditor({
 
   const handleSendInvoiceFromModal = useCallback(
     async (options: any) => {
-      if (!formState.clientId) {
-        showToast("error", "Select a client before sending.");
+      if (sendScheduleBlocker) {
+        showToast("error", sendScheduleBlocker);
+        return;
+      }
+      if (invoiceStatus === "sent") {
+        showToast("error", "Invoice already sent.");
+        return;
+      }
+      if (
+        (options.channel === "email" || options.channel === "both") &&
+        !selectedClient?.email &&
+        !options.recipientEmail
+      ) {
+        showToast("error", "Recipient email is required for email delivery.");
         return;
       }
       let invoiceId = savedInvoiceId;
@@ -539,7 +636,14 @@ export function ModernEditor({
         const res = await fetch("/api/invoices/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formState),
+          body: JSON.stringify({
+            ...formState,
+            number: formState.number || `DRAFT-${Date.now()}`,
+            templateSlug: currentTemplate,
+            sections,
+            reminderCadence: formState.reminderCadence,
+            attachments: formState.attachments,
+          }),
         });
         if (res.ok) {
           const data = await res.json();
@@ -558,6 +662,8 @@ export function ModernEditor({
         body: JSON.stringify({
           invoiceId,
           channel: options.channel,
+          recipientEmail: options.recipientEmail,
+          idempotencyKey: options.idempotencyKey,
           automationEnabled: options.automationEnabled,
           reminderSettings: options.reminderSettings,
         }),
@@ -571,10 +677,20 @@ export function ModernEditor({
         }
         showToast("success", "Invoice sent successfully!");
       } else {
-        showToast("error", "Failed to send invoice.");
+        const error = await sendRes.json().catch(() => ({}));
+        showToast("error", error.error || "Failed to send invoice.");
       }
     },
-    [formState, savedInvoiceId, showToast]
+    [
+      formState,
+      savedInvoiceId,
+      sendScheduleBlocker,
+      invoiceStatus,
+      selectedClient?.email,
+      currentTemplate,
+      sections,
+      showToast,
+    ]
   );
 
   const handleApproveAutomation = useCallback(async () => {
@@ -600,7 +716,13 @@ export function ModernEditor({
       setFormState((prev) => ({
         ...prev,
         automationApproval: prev.automationApproval
-          ? { ...prev.automationApproval, status: "APPROVED", approvedAt: new Date().toISOString() }
+          ? {
+              ...prev.automationApproval,
+              status: "APPROVED",
+              approvedAt: new Date().toISOString(),
+              scheduledSendAt:
+                data?.invoice?.scheduledSendAt || prev.automationApproval.scheduledSendAt,
+            }
           : prev.automationApproval,
       }));
 
@@ -717,7 +839,30 @@ export function ModernEditor({
     const total = subtotal + tax;
     return { subtotal, tax, total };
   }, [formState.items, formState.taxSettings?.defaultRate]);
+
+  const scheduleDisabledReason =
+    sendScheduleBlocker ||
+    (invoiceStatus === "sent"
+      ? "Invoice already sent. Create a new revision to schedule again."
+      : undefined);
+  const sendDisabledReason =
+    sendScheduleBlocker ||
+    (invoiceStatus === "sent"
+      ? "Invoice already sent. Create a new revision to send again."
+      : undefined);
+
+  const canSchedule = !scheduleDisabledReason;
+  const canSend = !sendDisabledReason;
   const approvalStatus = formState.automationApproval?.status;
+  const nextReminderAt = useMemo(() => {
+    const steps = formState.reminderSchedule?.steps || [];
+    const pending = steps
+      .filter((step) => step.status !== "SENT" && step.status !== "SKIPPED")
+      .map((step) => (step.sendAt ? new Date(step.sendAt) : null))
+      .filter((date): date is Date => !!date && !Number.isNaN(date.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime());
+    return pending[0]?.toISOString();
+  }, [formState.reminderSchedule?.steps]);
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-white">
@@ -734,6 +879,10 @@ export function ModernEditor({
         onSchedule={handleSchedule}
         onSend={handleSend}
         onOpenSendModal={handleOpenSendModal}
+        canSchedule={canSchedule}
+        scheduleDisabledReason={scheduleDisabledReason}
+        canSend={canSend}
+        sendDisabledReason={sendDisabledReason}
         approvalStatus={approvalStatus}
         onApproveAutomation={approvalStatus === "PENDING" ? handleApproveAutomation : undefined}
       />
@@ -778,12 +927,8 @@ export function ModernEditor({
             sidebarCollapsed={sidebarCollapsed}
             sidebarWidth={sidebarWidth}
             sections={sections}
-            selectedClient={
-              formState.clientId ? clients.find((c) => c.id === formState.clientId) : undefined
-            }
-            selectedProject={
-              formState.projectId ? projects.find((p) => p.id === formState.projectId) : undefined
-            }
+            selectedClient={selectedClient}
+            selectedProject={selectedProject}
           />
         </div>
 
@@ -880,12 +1025,25 @@ export function ModernEditor({
           })),
           currency: formState.currency || "INR",
         }}
-        client={clients.find((c) => c.id === formState.clientId)}
-        project={projects.find((p) => p.id === formState.projectId)}
+        client={selectedClient}
+        project={selectedProject}
         templateName={selectedTemplateName || "Classic Gray"}
         initialAutomationEnabled={
           !!(formState.remindersEnabled && formState.reminderSchedule?.steps?.length)
         }
+        automationState={{
+          invoiceStatus,
+          approvalStatus: formState.automationApproval?.status,
+          approvalRequestedAt: formState.automationApproval?.requestedAt,
+          approvedAt: formState.automationApproval?.approvedAt,
+          rejectedAt: formState.automationApproval?.rejectedAt,
+          scheduledSendAt: formState.automationApproval?.scheduledSendAt,
+          lastSentAt,
+          remindersEnabled: formState.remindersEnabled,
+          nextReminderAt,
+          escalationCount: formState.automationApproval?.escalationCount,
+          lastEscalatedAt: formState.automationApproval?.lastEscalatedAt,
+        }}
         onSend={handleSendInvoiceFromModal}
       />
 

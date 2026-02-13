@@ -1,8 +1,8 @@
 /**
  * Draft Invoice Approval Reminder API
- * 
+ *
  * POST /api/invoices/draft-reminders
- * 
+ *
  * This endpoint:
  * 1. Finds all draft invoices with due dates approaching (within X days)
  * 2. Sends reminder emails to workspace owners to review and approve
@@ -10,39 +10,49 @@
  */
 
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { sendEmail } from "@/lib/email";
+import { buildAppUrl } from "@/lib/app-url";
+import { z } from "zod";
+import { getWorkspaceApprovers } from "@/lib/invoices/approval-routing";
 
 // Days before due date to send reminders
 const REMINDER_DAYS_BEFORE = [7, 3, 1];
+const draftReminderRequestSchema = z.object({
+  daysBeforeDue: z.array(z.number().int().min(0).max(365)).max(10).optional(),
+  forceAll: z.boolean().optional(),
+});
 
 // Email template for draft approval reminders
 function getDraftApprovalEmail(params: {
-    userName: string;
-    invoiceNumber: string;
-    clientName: string;
-    amount: number;
-    currency: string;
-    dueDate: string;
-    approvalUrl: string;
-    daysUntilDue: number;
+  userName: string;
+  invoiceNumber: string;
+  clientName: string;
+  amount: number;
+  currency: string;
+  dueDate: string;
+  approvalUrl: string;
+  daysUntilDue: number;
 }) {
-    const urgencyColor = params.daysUntilDue <= 1
-        ? '#ef4444' // red
-        : params.daysUntilDue <= 3
-            ? '#f59e0b' // amber
-            : '#3b82f6'; // blue
+  const urgencyColor =
+    params.daysUntilDue <= 1
+      ? "#ef4444" // red
+      : params.daysUntilDue <= 3
+        ? "#f59e0b" // amber
+        : "#3b82f6"; // blue
 
-    const urgencyText = params.daysUntilDue <= 1
-        ? '⚠️ Due Tomorrow!'
-        : params.daysUntilDue <= 3
-            ? '📅 Due in 3 days'
-            : `📅 Due in ${params.daysUntilDue} days`;
+  const urgencyText =
+    params.daysUntilDue <= 1
+      ? "⚠️ Due Tomorrow!"
+      : params.daysUntilDue <= 3
+        ? "📅 Due in 3 days"
+        : `📅 Due in ${params.daysUntilDue} days`;
 
-    return `
+  return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -141,194 +151,179 @@ function getDraftApprovalEmail(params: {
     `;
 }
 
-export async function POST(req: Request) {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function POST(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+  if (!workspace) {
+    return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  }
+
+  try {
+    const parsed = draftReminderRequestSchema.safeParse(await req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request payload" }, { status: 422 });
+    }
+    const daysBeforeDue = parsed.data.daysBeforeDue || REMINDER_DAYS_BEFORE;
+    const forceAll = parsed.data.forceAll === true; // For testing only
+    if (forceAll && process.env.NODE_ENV === "production") {
+      return NextResponse.json({ error: "forceAll is disabled in production" }, { status: 403 });
     }
 
-    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
-    if (!workspace) {
-        return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
-    }
+    // Find draft invoices with approaching due dates
+    const now = new Date();
+    // Get draft invoices
+    const draftInvoices = await prisma.invoice.findMany({
+      where: {
+        workspaceId: workspace.id,
+        status: "draft",
+        ...(forceAll
+          ? {}
+          : {
+              dueDate: {
+                gte: now,
+                lte: new Date(now.getTime() + Math.max(...daysBeforeDue) * 24 * 60 * 60 * 1000),
+              },
+            }),
+      },
+      include: {
+        client: { select: { name: true, email: true } },
+        workspace: {
+          select: {
+            owner: { select: { name: true, email: true } },
+          },
+        },
+      },
+      orderBy: { dueDate: "asc" },
+      take: 100,
+    });
 
-    try {
-        const body = await req.json().catch(() => ({}));
-        const daysBeforeDue = body.daysBeforeDue || REMINDER_DAYS_BEFORE;
-        const forceAll = body.forceAll === true; // For testing, send all drafts
+    const results = {
+      checked: draftInvoices.length,
+      sent: 0,
+      skipped: 0,
+      errors: 0,
+      details: [] as any[],
+    };
 
-        console.log("[Draft Reminders] Starting scan...");
-        console.log("[Draft Reminders] Days before due to check:", daysBeforeDue);
+    for (const invoice of draftInvoices) {
+      try {
+        const approvers = await getWorkspaceApprovers(workspace.id);
+        if (approvers.length === 0) {
+          results.skipped++;
+          continue;
+        }
+        const primaryApprover = approvers[0];
+        const primaryApproverName = primaryApprover.name || "there";
 
-        // Find draft invoices with approaching due dates
-        const now = new Date();
-        const targetDates = daysBeforeDue.map((days: number) => {
-            const date = new Date(now);
-            date.setDate(date.getDate() + days);
-            date.setHours(0, 0, 0, 0);
-            return date;
-        });
+        const dueDate = invoice.dueDate ? new Date(invoice.dueDate) : new Date();
+        const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
 
-        // Get draft invoices
-        const draftInvoices = await prisma.invoice.findMany({
-            where: {
-                workspaceId: workspace.id,
-                status: "draft",
-                ...(forceAll ? {} : {
-                    dueDate: {
-                        gte: now,
-                        lte: new Date(now.getTime() + Math.max(...daysBeforeDue) * 24 * 60 * 60 * 1000)
-                    }
-                })
-            },
-            include: {
-                client: { select: { name: true, email: true } },
-                workspace: {
-                    select: {
-                        owner: { select: { name: true, email: true } }
-                    }
-                }
-            },
-            orderBy: { dueDate: "asc" }
-        });
-
-        console.log(`[Draft Reminders] Found ${draftInvoices.length} draft invoices`);
-
-        const results = {
-            checked: draftInvoices.length,
-            sent: 0,
-            skipped: 0,
-            errors: 0,
-            details: [] as any[]
-        };
-
-        const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-
-        for (const invoice of draftInvoices) {
-            try {
-                const ownerEmail = invoice.workspace?.owner?.email;
-                const ownerName = invoice.workspace?.owner?.name || "there";
-
-                if (!ownerEmail) {
-                    console.log(`[Draft Reminders] Skipping ${invoice.number} - no owner email`);
-                    results.skipped++;
-                    continue;
-                }
-
-                const dueDate = invoice.dueDate ? new Date(invoice.dueDate) : new Date();
-                const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-
-                // Check if this is a target reminder day (unless forceAll)
-                if (!forceAll && !daysBeforeDue.includes(daysUntilDue)) {
-                    console.log(`[Draft Reminders] Skipping ${invoice.number} - ${daysUntilDue} days until due (not a reminder day)`);
-                    results.skipped++;
-                    continue;
-                }
-
-                const approvalUrl = `${baseUrl}/invoices/new?id=${invoice.id}`;
-                const total = typeof invoice.total === 'object'
-                    ? Number(invoice.total)
-                    : invoice.total;
-
-                const emailHtml = getDraftApprovalEmail({
-                    userName: ownerName.split(" ")[0],
-                    invoiceNumber: invoice.number,
-                    clientName: invoice.client?.name || "Unknown Client",
-                    amount: Number(total) || 0,
-                    currency: invoice.currency || "INR",
-                    dueDate: dueDate.toLocaleDateString("en-IN", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric"
-                    }),
-                    approvalUrl,
-                    daysUntilDue
-                });
-
-                console.log(`[Draft Reminders] Sending reminder for ${invoice.number} to ${ownerEmail}`);
-
-                await sendEmail({
-                    to: ownerEmail,
-                    subject: `📝 Action Required: Approve Draft Invoice ${invoice.number}`,
-                    html: emailHtml
-                });
-
-                results.sent++;
-                results.details.push({
-                    invoiceNumber: invoice.number,
-                    clientName: invoice.client?.name,
-                    daysUntilDue,
-                    sentTo: ownerEmail
-                });
-
-                console.log(`[Draft Reminders] ✅ Sent reminder for ${invoice.number}`);
-
-            } catch (error) {
-                console.error(`[Draft Reminders] ❌ Error processing ${invoice.number}:`, error);
-                results.errors++;
-            }
+        // Check if this is a target reminder day (unless forceAll)
+        if (!forceAll && !daysBeforeDue.includes(daysUntilDue)) {
+          results.skipped++;
+          continue;
         }
 
-        console.log(`[Draft Reminders] Complete. Sent: ${results.sent}, Skipped: ${results.skipped}, Errors: ${results.errors}`);
+        const approvalUrl = buildAppUrl(`/invoices/new?id=${invoice.id}`);
+        const total = typeof invoice.total === "object" ? Number(invoice.total) : invoice.total;
 
-        return NextResponse.json({
-            success: true,
-            ...results
+        const emailHtml = getDraftApprovalEmail({
+          userName: primaryApproverName.split(" ")[0],
+          invoiceNumber: invoice.number,
+          clientName: invoice.client?.name || "Unknown Client",
+          amount: Number(total) || 0,
+          currency: invoice.currency || "INR",
+          dueDate: dueDate.toLocaleDateString("en-IN", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          }),
+          approvalUrl,
+          daysUntilDue,
         });
 
-    } catch (error) {
-        console.error("[Draft Reminders] Fatal error:", error);
-        return NextResponse.json({ error: "Failed to process draft reminders" }, { status: 500 });
+        for (const approver of approvers) {
+          await sendEmail({
+            to: approver.email,
+            subject: `📝 Action Required: Approve Draft Invoice ${invoice.number}`,
+            html: emailHtml,
+          });
+        }
+
+        results.sent++;
+        results.details.push({
+          invoiceNumber: invoice.number,
+          clientName: invoice.client?.name,
+          daysUntilDue,
+          sentTo: approvers.map((approver) => approver.email),
+        });
+      } catch (error) {
+        console.error(`[Draft Reminders] Error processing ${invoice.number}:`, error);
+        results.errors++;
+      }
     }
+
+    return NextResponse.json({
+      success: true,
+      ...results,
+    });
+  } catch (error) {
+    console.error("[Draft Reminders] Fatal error:", error);
+    return NextResponse.json({ error: "Failed to process draft reminders" }, { status: 500 });
+  }
 }
 
 // GET endpoint to check draft invoices needing approval
 export async function GET(req: Request) {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
-    if (!workspace) {
-        return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
-    }
+  const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+  if (!workspace) {
+    return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  }
 
-    try {
-        const now = new Date();
-        const maxDays = Math.max(...REMINDER_DAYS_BEFORE);
+  try {
+    const now = new Date();
+    const maxDays = Math.max(...REMINDER_DAYS_BEFORE);
 
-        const draftInvoices = await prisma.invoice.findMany({
-            where: {
-                workspaceId: workspace.id,
-                status: "draft",
-                dueDate: {
-                    gte: now,
-                    lte: new Date(now.getTime() + maxDays * 24 * 60 * 60 * 1000)
-                }
-            },
-            include: {
-                client: { select: { name: true } }
-            },
-            orderBy: { dueDate: "asc" }
-        });
+    const draftInvoices = await prisma.invoice.findMany({
+      where: {
+        workspaceId: workspace.id,
+        status: "draft",
+        dueDate: {
+          gte: now,
+          lte: new Date(now.getTime() + maxDays * 24 * 60 * 60 * 1000),
+        },
+      },
+      include: {
+        client: { select: { name: true } },
+      },
+      orderBy: { dueDate: "asc" },
+    });
 
-        return NextResponse.json({
-            count: draftInvoices.length,
-            invoices: draftInvoices.map(inv => ({
-                id: inv.id,
-                number: inv.number,
-                clientName: inv.client?.name,
-                total: inv.total,
-                currency: inv.currency,
-                dueDate: inv.dueDate,
-                daysUntilDue: inv.dueDate
-                    ? Math.ceil((new Date(inv.dueDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000))
-                    : null
-            }))
-        });
-    } catch (error) {
-        console.error("[Draft Reminders] Error fetching drafts:", error);
-        return NextResponse.json({ error: "Failed to fetch draft invoices" }, { status: 500 });
-    }
+    return NextResponse.json({
+      count: draftInvoices.length,
+      invoices: draftInvoices.map((inv) => ({
+        id: inv.id,
+        number: inv.number,
+        clientName: inv.client?.name,
+        total: inv.total,
+        currency: inv.currency,
+        dueDate: inv.dueDate,
+        daysUntilDue: inv.dueDate
+          ? Math.ceil((new Date(inv.dueDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000))
+          : null,
+      })),
+    });
+  } catch (error) {
+    console.error("[Draft Reminders] Error fetching drafts:", error);
+    return NextResponse.json({ error: "Failed to fetch draft invoices" }, { status: 500 });
+  }
 }

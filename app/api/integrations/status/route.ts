@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { getUserTier, TIER_LIMITS } from "@/lib/tier-limits";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { subDays } from "date-fns";
+import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,6 +35,7 @@ export async function GET(request: NextRequest) {
         integrationsEnabled: false,
         limits: { maxConnections: 0, importsPerDay: 0, importsPerMinute: 0 },
         usage: { connectionsUsed: 0, importsToday: 0 },
+        canManageIntegrations: false,
         autopilot: {
           isConfigured: false,
           status: "OFF",
@@ -51,6 +53,7 @@ export async function GET(request: NextRequest) {
       });
     }
     const workspaceId = workspace.id;
+    const canManageIntegrations = await isWorkspaceApprover(workspaceId, session.user.id);
     const tier = getUserTier(session.user.id, session.user.email);
     const tierLimits = TIER_LIMITS[tier];
 
@@ -187,6 +190,7 @@ export async function GET(request: NextRequest) {
         connectionsUsed: connections.filter((c) => c.status === "CONNECTED").length,
         importsToday: slackImportCountToday + notionImportCountToday,
       },
+      canManageIntegrations,
       // Autopilot stats for automation page
       autopilot: {
         isConfigured,

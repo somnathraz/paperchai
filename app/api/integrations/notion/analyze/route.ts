@@ -20,6 +20,7 @@ import { requirePremium, checkDailyImportLimit } from "@/lib/middleware/premium-
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { getUserTier } from "@/lib/tier-limits";
 import { notionImportSchema, sanitizeJson } from "@/lib/validation/integration-schemas";
+import { resolveIntegrationWorkspace, requireIntegrationManager } from "@/lib/integrations/access";
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,10 +42,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: rateLimit.error }, { status: 429 });
     }
 
-    // 4. Get workspace ID
-    const workspaceId = (session.user as any).activeWorkspaceId;
-    if (!workspaceId) {
+    // 4. Resolve workspace from DB
+    const workspace = await resolveIntegrationWorkspace(session.user.id, session.user.name);
+    if (!workspace) {
       return NextResponse.json({ error: "No active workspace" }, { status: 400 });
+    }
+    const workspaceId = workspace.id;
+    const canManage = await requireIntegrationManager(session.user.id, workspaceId);
+    if (!canManage) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // daily import limit removed for analysis preview
@@ -241,26 +247,23 @@ ${createBorderedBox(
 
         // Call the SAME extraction endpoint as PDF wizard
         // This correctly extracts Client + Project + Milestones
-        const aiResponse = await fetch(
-          `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/ai/projects/extract`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              // Forward auth cookie for session
-              Cookie: request.headers.get("cookie") || "",
+        const aiResponse = await fetch(new URL("/api/ai/projects/extract", request.url), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // Forward auth cookie for session
+            Cookie: request.headers.get("cookie") || "",
+          },
+          body: JSON.stringify({
+            fileMeta: {
+              fileKey: `notion/${pageId}`,
+              fileName: `${pageTitle}.txt`,
+              mimeType: "text/plain",
+              size: combinedText.length,
             },
-            body: JSON.stringify({
-              fileMeta: {
-                fileKey: `notion/${pageId}`,
-                fileName: `${pageTitle}.txt`,
-                mimeType: "text/plain",
-                size: combinedText.length,
-              },
-              debugText: combinedText, // Pass text directly (no file upload needed)
-            }),
-          }
-        );
+            debugText: combinedText, // Pass text directly (no file upload needed)
+          }),
+        });
 
         const aiResult = await aiResponse.json();
 

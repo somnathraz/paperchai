@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 
+const RUNNER_SUPPORTED_TRIGGERS = new Set(["MILESTONE_DUE", "INVOICE_OVERDUE"]);
+
 // POST /api/automation/rules/[id]/approve - Approve pending automation
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -34,6 +36,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       );
     }
 
+    if (!RUNNER_SUPPORTED_TRIGGERS.has(automation.trigger)) {
+      return NextResponse.json(
+        {
+          error: "Trigger is not supported yet",
+          details: `Supported triggers: ${Array.from(RUNNER_SUPPORTED_TRIGGERS).join(", ")}`,
+        },
+        { status: 422 }
+      );
+    }
+
     // Calculate next run time (for demonstration, set to 1 hour from now)
     const nextRunAt = new Date();
     nextRunAt.setHours(nextRunAt.getHours() + 1);
@@ -48,13 +60,81 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     });
 
+    // SIDE EFFECT: Trigger invoice generation for NOTION_STATUS_CHANGE automations
+    let generatedInvoices: Array<{ id: string; number: string }> = [];
+
+    if (updated.trigger === "NOTION_STATUS_CHANGE") {
+      try {
+        // Find pending Notion imports for this workspace that haven't been invoiced
+        const pendingImports = await prisma.notionImport.findMany({
+          where: {
+            connection: {
+              workspaceId: workspace.id,
+            },
+            status: "COMPLETED",
+            importType: "INVOICE_DATA",
+          },
+          include: {
+            connection: true,
+          },
+          take: 10, // Limit to prevent overwhelming
+        });
+
+        // For each pending import, create a draft invoice if not already exists
+        for (const importRecord of pendingImports) {
+          // Check if invoice already exists for this Notion page
+          const existingInvoice = await prisma.invoice.findFirst({
+            where: {
+              workspaceId: workspace.id,
+              notes: {
+                contains: importRecord.notionPageId || "",
+              },
+            },
+          });
+
+          if (!existingInvoice && importRecord.clientId) {
+            // Generate invoice number
+            const invoiceCount = await prisma.invoice.count({
+              where: { workspaceId: workspace.id },
+            });
+            const invoiceNumber = `INV-${String(invoiceCount + 1).padStart(4, "0")}`;
+
+            // Create draft invoice
+            const invoice = await prisma.invoice.create({
+              data: {
+                workspaceId: workspace.id,
+                clientId: importRecord.clientId,
+                number: invoiceNumber,
+                status: "draft",
+                currency: "INR",
+                subtotal: 0,
+                taxTotal: 0,
+                total: 0,
+                notes: `Auto-generated from Notion (Page: ${importRecord.notionPageId}). Automation: ${updated.name}`,
+                issueDate: new Date(),
+              },
+            });
+
+            generatedInvoices.push({ id: invoice.id, number: invoice.number });
+          }
+        }
+      } catch (invoiceError) {
+        console.error("[AUTOMATION_APPROVE] Invoice generation error:", invoiceError);
+        // Don't fail the approval, just log the error
+      }
+    }
+
     return NextResponse.json({
       automation: {
         id: updated.id,
         name: updated.name,
         status: updated.status,
       },
-      message: "Automation approved and activated!",
+      generatedInvoices,
+      message:
+        generatedInvoices.length > 0
+          ? `Automation approved! Created ${generatedInvoices.length} draft invoice(s).`
+          : "Automation approved and activated!",
     });
   } catch (error) {
     console.error("[AUTOMATION_APPROVE]", error);

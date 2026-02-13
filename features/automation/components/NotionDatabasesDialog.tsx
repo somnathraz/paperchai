@@ -115,11 +115,14 @@ export function NotionDatabasesDialog({ open, onClose }: NotionDatabasesDialogPr
     setError(null);
     try {
       const response = await fetch("/api/integrations/notion/databases");
-      if (!response.ok) {
-        throw new Error("Failed to fetch databases");
-      }
       const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to fetch databases");
+      }
       setDatabases(data.databases || []);
+      if (data?.guidance) {
+        setError(data.guidance);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -138,19 +141,23 @@ export function NotionDatabasesDialog({ open, onClose }: NotionDatabasesDialogPr
 
     try {
       const response = await fetch(`/api/integrations/notion/databases/${databaseId}/pages`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch pages");
-      }
       const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to fetch pages");
+      }
       setDbPages((prev) => ({
         ...prev,
         [databaseId]: data.pages || [],
       }));
+      if (data?.guidance) {
+        setError(data.guidance);
+      }
       if (!selectedPages[databaseId]) {
         setSelectedPages((prev) => ({ ...prev, [databaseId]: new Set() }));
       }
     } catch (err) {
-      console.error("Failed to fetch pages:", err);
+      const message = err instanceof Error ? err.message : "Failed to fetch pages";
+      setError(message);
       setExpandedDb(null);
     } finally {
       setLoadingPages(null);

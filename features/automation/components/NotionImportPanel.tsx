@@ -21,6 +21,8 @@ export function NotionImportPanel() {
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, ImportResult>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [guidance, setGuidance] = useState<string | null>(null);
 
   useEffect(() => {
     fetchDatabases();
@@ -28,20 +30,24 @@ export function NotionImportPanel() {
 
   async function fetchDatabases() {
     try {
+      setError(null);
+      setGuidance(null);
       const res = await fetch("/api/integrations/notion/databases");
-      if (!res.ok) throw new Error("Failed to fetch databases");
       const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to fetch databases");
 
       const formatted =
-        data.results?.map((db: any) => ({
+        data.databases?.map((db: any) => ({
           id: db.id,
-          title: db.title?.[0]?.plain_text || "Untitled",
-          propertyCount: Object.keys(db.properties || {}).length,
+          title: db.title || "Untitled",
+          propertyCount: Array.isArray(db.properties) ? db.properties.length : 0,
         })) || [];
 
       setDatabases(formatted);
+      setGuidance(data?.guidance || null);
     } catch (error) {
       console.error("Error fetching databases:", error);
+      setError(error instanceof Error ? error.message : "Failed to fetch Notion databases");
     } finally {
       setLoading(false);
     }
@@ -103,8 +109,11 @@ export function NotionImportPanel() {
     return (
       <div className="text-center py-8 text-stone-500">
         <Database className="w-12 h-12 mx-auto mb-3 opacity-30" />
-        <p className="text-sm">No databases found in your Notion workspace</p>
-        <p className="text-xs mt-1">Make sure your integration has access to databases</p>
+        <p className="text-sm">{error || "No databases found in your Notion workspace"}</p>
+        <p className="text-xs mt-1">
+          {guidance ||
+            "Make sure your Notion database is shared with this integration, then refresh."}
+        </p>
       </div>
     );
   }

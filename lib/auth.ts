@@ -3,8 +3,8 @@ import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
-import { PlatformRole } from "@prisma/client";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { authPolicy, isActiveUserStatus } from "@/lib/security/auth-policy";
+import { getSessionVersion } from "@/lib/security/auth-session-version";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -23,31 +23,38 @@ export const authOptions: NextAuthOptions = {
         const password = credentials?.password;
 
         if (!email || !password) {
-          throw new Error("Missing credentials");
+          throw new Error(authPolicy.messages.invalidCredentials);
         }
 
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) {
-          throw new Error("Account not found");
+          throw new Error(authPolicy.messages.invalidCredentials);
         }
 
         if (!user.password) {
-          throw new Error("Use Google sign-in for this account");
+          throw new Error(authPolicy.messages.invalidCredentials);
         }
 
         const valid = await bcrypt.compare(password, user.password);
         if (!valid) {
-          throw new Error("Invalid credentials");
+          throw new Error(authPolicy.messages.invalidCredentials);
         }
 
-        if (user.status !== "ACTIVE") {
-          throw new Error("Account is suspended or deleted");
+        if (!user.emailVerified) {
+          throw new Error(authPolicy.messages.verifyEmail);
         }
+
+        if (!isActiveUserStatus(user.status)) {
+          throw new Error(authPolicy.messages.invalidCredentials);
+        }
+
+        const sessionVersion = await getSessionVersion(user.id);
 
         return {
           id: user.id,
           name: user.name ?? user.email.split("@")[0],
           email: user.email,
+          sessionVersion: String(sessionVersion),
         };
       },
     }),
@@ -76,7 +83,7 @@ export const authOptions: NextAuthOptions = {
           });
         } else {
           // Block suspended users
-          if (dbUser.status !== "ACTIVE") return false;
+          if (!isActiveUserStatus(dbUser.status)) return false;
 
           // Update basic profile info
           await prisma.user.update({
@@ -92,6 +99,7 @@ export const authOptions: NextAuthOptions = {
       // Initial sign in
       if (user) {
         token.sub = user.id;
+        token.sessionVersion = Number((user as any).sessionVersion ?? 0);
       }
 
       // Handle Active Workspace updates (Client sending update)
@@ -104,6 +112,16 @@ export const authOptions: NextAuthOptions = {
             data: { activeWorkspaceId: session.activeWorkspaceId },
           })
           .catch(console.error);
+      }
+
+      if (token.sub) {
+        const currentVersion = await getSessionVersion(token.sub as string);
+        if (currentVersion !== Number(token.sessionVersion ?? 0)) {
+          delete token.sub;
+          delete token.workspaceId;
+          token.invalidated = true;
+          return token;
+        }
       }
 
       // If no workspace in token, try to load last valid one from DB or first available
