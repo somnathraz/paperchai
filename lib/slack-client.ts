@@ -8,7 +8,7 @@ import crypto from "crypto";
 import { encrypt, decrypt } from "@/lib/encryption";
 
 const SLACK_API_BASE = "https://slack.com/api";
-const SLACK_REQUEST_TIMEOUT_MS = 2000;
+const SLACK_REQUEST_TIMEOUT_MS = 1200;
 
 // ===== Slack Signature Verification =====
 
@@ -286,11 +286,24 @@ export async function getUserInfo(
 export async function testAuth(
   accessToken: string
 ): Promise<{ ok: boolean; team?: string; team_id?: string; user_id?: string; error?: string }> {
-  const response = await fetch(`${SLACK_API_BASE}/auth.test`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
 
-  return response.json();
+  try {
+    const response = await fetch(`${SLACK_API_BASE}/auth.test`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      signal: controller.signal,
+    });
+
+    return response.json();
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return { ok: false, error: "auth.test timeout" };
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }

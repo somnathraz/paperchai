@@ -34,6 +34,7 @@ type SlackConnectionCandidate = {
 const SLACK_COMMAND_WINDOW_MS = 60 * 1000;
 const SLACK_COMMAND_LIMIT_PER_USER = 30;
 const slackCommandRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const SLACK_FALLBACK_MAX_CANDIDATES = 5;
 
 export async function POST(request: NextRequest) {
   let event: { id: string } | null = null;
@@ -144,6 +145,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (command.intent === "help") {
+      await finalizeCommandEvent(event.id, "EXECUTED", command);
+      return helpResponse();
+    }
+
     const accessToken = decrypt(connection.accessToken);
     const actor = await resolveSlackActor({
       workspaceId: connection.workspaceId,
@@ -165,11 +171,6 @@ export async function POST(request: NextRequest) {
         response_type: "ephemeral",
         text: "Your Slack account is not linked to a PaperChai workspace member. Ask an admin to sign in once with the same email.",
       });
-    }
-
-    if (command.intent === "help") {
-      await finalizeCommandEvent(event.id, "EXECUTED", command);
-      return helpResponse();
     }
 
     const isReadOnlyActor = actor.role === "VIEWER";
@@ -478,6 +479,7 @@ async function resolveConnectionBySlackAuth(
       status: "CONNECTED",
       accessToken: { not: null },
     },
+    orderBy: { updatedAt: "desc" },
     select: {
       id: true,
       workspaceId: true,
@@ -485,6 +487,7 @@ async function resolveConnectionBySlackAuth(
       providerWorkspaceId: true,
       providerWorkspaceName: true,
     },
+    take: SLACK_FALLBACK_MAX_CANDIDATES,
   });
 
   if (candidates.length === 0) return null;
