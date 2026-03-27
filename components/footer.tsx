@@ -37,11 +37,11 @@ export function Footer({ className }: { className?: string }) {
         </div>
 
         {/* Links */}
-        <div className="grid grid-cols-2 gap-10 text-sm sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-10 text-sm sm:grid-cols-4">
           <div className="space-y-3">
             <p className="font-semibold text-foreground/90">Product</p>
-            <FooterLink label="Features" />
-            <FooterLink label="Pricing" />
+            <FooterLink label="Features" href="#features" />
+            <FooterLink label="Pricing" href="#pricing" />
             <FooterLink label="Templates" />
             <FooterLink label="Integrations" />
           </div>
@@ -58,8 +58,16 @@ export function Footer({ className }: { className?: string }) {
             <p className="font-semibold text-foreground/90">Support</p>
             <FooterLink label="Help Center" />
             <FooterLink label="Tutorials" />
-            <FooterLink label="Security" />
+            <FooterLink label="FAQ" href="#faq" />
             <FooterLink label="Contact" href="/contact-us" />
+          </div>
+
+          <div className="space-y-3">
+            <p className="font-semibold text-foreground/90">Legal</p>
+            <FooterLink label="Privacy Policy" href="/privacy-policy" />
+            <FooterLink label="Terms & Conditions" href="/terms-and-conditions" />
+            <FooterLink label="Refund Policy" href="/refund-policy" />
+            <FooterLink label="Cookie Policy" href="/cookie-policy" />
           </div>
         </div>
       </div>
@@ -70,11 +78,8 @@ export function Footer({ className }: { className?: string }) {
       {/* Bottom */}
       <div className="flex flex-col items-center justify-between gap-4 text-xs text-muted-foreground sm:flex-row">
         <p>© PaperChai 2025. All rights reserved.</p>
-        <div className="flex items-center gap-4">
-          <FooterLink label="Terms" href="/terms-and-conditions" small />
-          <FooterLink label="Privacy" href="/privacy-policy" small />
-          <FooterLink label="Refunds" href="/refund-policy" small />
-          <FooterLink label="Cookies" small />
+        <div className="flex items-center gap-4 text-[10px] opacity-60">
+          <span>Reliable invoicing for the global creator economy.</span>
         </div>
       </div>
     </footer>
