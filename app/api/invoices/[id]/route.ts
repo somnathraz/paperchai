@@ -37,6 +37,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     invoice: {
       ...invoice,
       sendMeta: invoice.sendMeta || null,
+      total: invoice.total?.toString?.() || invoice.total,
+      amountPaid: invoice.amountPaid?.toString?.() || invoice.amountPaid,
     },
   });
 }

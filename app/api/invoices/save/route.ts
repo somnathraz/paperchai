@@ -4,7 +4,9 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { Prisma } from "@prisma/client";
+import { generateWorkspaceInvoiceNumber } from "@/lib/invoices/numbering";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { z } from "zod";
 import { isValidInvoiceDateOrder } from "@/lib/invoices/workflow-validation";
 
@@ -20,6 +22,10 @@ const saveInvoiceSchema = z.object({
   currency: z.string().length(3).optional(),
   notes: z.string().max(5000).optional(),
   terms: z.string().max(5000).optional(),
+  paymentMethod: z.string().max(100).optional(),
+  paymentInstructions: z.string().max(5000).optional(),
+  paymentLinkUrl: z.string().url().max(2048).optional().or(z.literal("")),
+  allowPartialPayments: z.boolean().optional(),
   reminderTone: z.string().max(100).optional(),
   reminderCadence: z.any().optional(),
   fontFamily: z.string().max(100).optional(),
@@ -43,6 +49,13 @@ export async function POST(req: Request) {
 
   const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
   if (!workspace) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const parsed = saveInvoiceSchema.safeParse(await req.json());
   if (!parsed.success) {
@@ -61,6 +74,10 @@ export async function POST(req: Request) {
     currency,
     notes,
     terms,
+    paymentMethod,
+    paymentInstructions,
+    paymentLinkUrl,
+    allowPartialPayments,
     reminderTone,
     reminderCadence,
     fontFamily,
@@ -80,7 +97,7 @@ export async function POST(req: Request) {
 
   // For drafts, we only require an invoice number (client can be added later)
   // Auto-generate invoice number if not provided
-  const invoiceNumber = number || `DRAFT-${Date.now()}`;
+  const invoiceNumber = number || (await generateWorkspaceInvoiceNumber(workspace.id));
 
   if (!invoiceNumber) {
     return NextResponse.json({ error: "Invoice number is required" }, { status: 400 });
@@ -116,8 +133,32 @@ export async function POST(req: Request) {
     );
   }
 
-  // If no client is provided, we need to create a placeholder or use a default
+  // Validate and resolve project/client references in the active workspace.
+  const project = projectId
+    ? await prisma.project.findFirst({
+        where: { id: projectId, workspaceId: workspace.id },
+        select: { id: true, clientId: true },
+      })
+    : null;
+  if (projectId && !project) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  if (providedClientId) {
+    const client = await prisma.client.findFirst({
+      where: { id: providedClientId, workspaceId: workspace.id },
+      select: { id: true },
+    });
+    if (!client) {
+      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    }
+  }
+
+  // If no client is provided, derive from project when possible; otherwise use placeholder.
   let clientId = providedClientId;
+  if (!clientId && project?.clientId) {
+    clientId = project.clientId;
+  }
   if (!clientId) {
     // Try to find or create a default "Draft" client for the workspace
     const defaultClient = await prisma.client.findFirst({
@@ -143,6 +184,12 @@ export async function POST(req: Request) {
     } else {
       clientId = defaultClient.id;
     }
+  }
+  if (project?.clientId && clientId && project.clientId !== clientId) {
+    return NextResponse.json(
+      { error: "Selected project does not belong to selected client" },
+      { status: 422 }
+    );
   }
 
   const template = templateSlug
@@ -203,7 +250,7 @@ export async function POST(req: Request) {
   const data = {
     workspaceId: workspace.id,
     clientId, // Now guaranteed to have a value (either provided or default)
-    projectId: projectId || null,
+    projectId: project?.id || null,
     templateId: template?.id,
     number: invoiceNumber,
     status: "draft" as const,
@@ -212,6 +259,10 @@ export async function POST(req: Request) {
     currency: currency || "INR",
     notes: notes || null,
     terms: terms || null,
+    paymentMethod: paymentMethod || null,
+    paymentInstructions: paymentInstructions || null,
+    paymentLinkUrl: paymentLinkUrl || null,
+    allowPartialPayments: allowPartialPayments ?? false,
     reminderTone: reminderTone || "Warm + Polite",
     subtotal: subtotalCalc,
     taxTotal: taxCalc,
@@ -273,36 +324,47 @@ export async function POST(req: Request) {
   }));
 
   let upserted;
-  if (id) {
-    const existing = await prisma.invoice.findFirst({
-      where: { id, workspaceId: workspace.id },
-      select: { id: true },
-    });
-    if (!existing) {
-      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
-    }
+  try {
+    if (id) {
+      const existing = await prisma.invoice.findFirst({
+        where: { id, workspaceId: workspace.id },
+        select: { id: true },
+      });
+      if (!existing) {
+        return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+      }
 
-    upserted = await prisma.invoice.update({
-      where: { id },
-      data: {
-        ...data,
-        items: {
-          deleteMany: {},
-          create: itemCreates,
+      upserted = await prisma.invoice.update({
+        where: { id },
+        data: {
+          ...data,
+          items: {
+            deleteMany: {},
+            create: itemCreates,
+          },
         },
-      },
-      include: { items: true },
-    });
-  } else {
-    upserted = await prisma.invoice.create({
-      data: {
-        ...data,
-        items: {
-          create: itemCreates,
+        include: { items: true },
+      });
+    } else {
+      upserted = await prisma.invoice.create({
+        data: {
+          ...data,
+          items: {
+            create: itemCreates,
+          },
         },
-      },
-      include: { items: true },
-    });
+        include: { items: true },
+      });
+    }
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return NextResponse.json(
+        { error: "Invoice number already exists in this workspace" },
+        { status: 409 }
+      );
+    }
+    console.error("Failed to save invoice:", error);
+    return NextResponse.json({ error: "Failed to save invoice" }, { status: 500 });
   }
 
   return NextResponse.json({ invoice: upserted });

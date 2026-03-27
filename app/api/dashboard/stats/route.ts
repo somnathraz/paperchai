@@ -22,6 +22,8 @@ export async function GET() {
         averagePaymentTime: 0,
         reliability: 0,
         outstandingAmount: 0,
+        balanceDueAmount: 0,
+        partialPaymentsAmount: 0,
         collectedSparkline: [0, 0, 0, 0, 0],
         outstandingSparkline: [0, 0, 0, 0, 0],
         payoutSparkline: [0, 0, 0, 0, 0],
@@ -34,7 +36,7 @@ export async function GET() {
     // Fetch invoices
     const invoices = await prisma.invoice.findMany({
       where: { workspaceId: workspace.id },
-      select: { status: true, total: true, issueDate: true, updatedAt: true },
+      select: { status: true, total: true, amountPaid: true, issueDate: true, updatedAt: true },
       orderBy: { issueDate: "desc" },
     });
 
@@ -53,6 +55,14 @@ export async function GET() {
       ["sent", "scheduled", "overdue"].includes(i.status)
     );
     const outstanding = outstandingInvoices.reduce((sum, i) => sum + Number(i.total || 0), 0);
+    const balanceDue = outstandingInvoices.reduce(
+      (sum, i) => sum + Math.max(0, Number(i.total || 0) - Number(i.amountPaid || 0)),
+      0
+    );
+    const partialPaymentsAmount = outstandingInvoices.reduce(
+      (sum, i) => sum + Number(i.amountPaid || 0),
+      0
+    );
 
     // Calculate average payout time
     const paidWithDates = paidInvoices.filter((i) => i.issueDate);
@@ -114,6 +124,8 @@ export async function GET() {
 
       // Extended data for Sparklines/Cards
       outstandingAmount: outstanding,
+      balanceDueAmount: balanceDue,
+      partialPaymentsAmount,
       collectedSparkline: collectedSparkline.length > 0 ? collectedSparkline : [0, 0, 0, 0, 0],
       outstandingSparkline:
         outstandingSparkline.length > 0 ? outstandingSparkline : [0, 0, 0, 0, 0],

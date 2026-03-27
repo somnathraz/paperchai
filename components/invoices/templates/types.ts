@@ -45,7 +45,11 @@ export interface TemplateProps {
     invoiceNumber?: string;
     logoUrl?: string;
     logoSettings?: { width?: number; height?: number; style?: "rounded" | "square" | "circle" };
-    signatureSettings?: { width?: number; height?: number; style?: "rounded" | "square" | "circle" };
+    signatureSettings?: {
+      width?: number;
+      height?: number;
+      style?: "rounded" | "square" | "circle";
+    };
     clientName?: string;
     clientEmail?: string;
     clientPhone?: string;
@@ -73,6 +77,10 @@ export interface TemplateProps {
     items?: Array<{ name: string; amount: string }>;
     notes?: string;
     paymentTerms?: string;
+    paymentMethod?: string;
+    paymentInstructions?: string;
+    paymentLinkUrl?: string;
+    allowPartialPayments?: boolean;
     reminderCadence?: {
       softDays?: number;
       mediumDays?: number;

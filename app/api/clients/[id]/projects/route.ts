@@ -3,14 +3,12 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
-import {
-  ProjectType,
-  BillingStrategy,
-  MilestoneBillingTrigger,
-  MilestoneStatus,
-} from "@prisma/client";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
+import { generateWorkspaceInvoiceNumber } from "@/lib/invoices/numbering";
+import { assertLimit } from "@/lib/usage";
+import { serializeEntitlementError } from "@/lib/entitlements";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -21,6 +19,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  }
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { id } = await params;
@@ -46,6 +51,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   try {
+    await assertLimit(workspace.id, session.user.id, "projects");
+
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, workspaceId: workspace.id },
+      select: { id: true },
+    });
+    if (!client) {
+      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    }
+
     const project = await prisma.project.create({
       data: {
         workspaceId: workspace.id,
@@ -139,6 +154,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     return NextResponse.json({ project });
   } catch (error) {
+    if (
+      (error as any)?.code === "PLAN_LIMIT_REACHED" ||
+      (error as any)?.code === "SUBSCRIPTION_INACTIVE"
+    ) {
+      const serialized = serializeEntitlementError(error as any);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+    }
     console.error("Error creating project:", error);
     return NextResponse.json({ error: "Failed to create project" }, { status: 500 });
   }
@@ -151,36 +175,53 @@ async function generateInvoiceForMilestone(
   projectId: string,
   milestone: any
 ) {
-  // Basic Invoice Generation
-  try {
-    await prisma.invoice.create({
-      data: {
-        workspaceId,
-        clientId,
-        projectId,
-        number: `INV-${Date.now()}`, // Simple auto-generation
-        issueDate: new Date(),
-        dueDate: milestone.dueDate || new Date(), // Immediate due
-        currency: milestone.currency,
-        status: "draft", // Always draft first
-        notes: `Auto-generated for milestone: ${milestone.title}`,
-        subtotal: milestone.amount,
-        total: milestone.amount, // Tax calculation would happen here ideally
-        items: {
-          create: [
-            {
-              title: milestone.title,
-              description: milestone.description || `Milestone payment for ${milestone.title}`,
-              quantity: 1,
-              unitPrice: milestone.amount,
-              total: milestone.amount,
-            },
-          ],
+  // Basic Invoice Generation with collision-safe numbering.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const number = await generateWorkspaceInvoiceNumber(workspaceId);
+    try {
+      await prisma.invoice.create({
+        data: {
+          workspaceId,
+          clientId,
+          projectId,
+          number,
+          issueDate: new Date(),
+          dueDate: milestone.dueDate || new Date(), // Immediate due
+          currency: milestone.currency,
+          status: "draft", // Always draft first
+          notes: `Auto-generated for milestone: ${milestone.title}`,
+          subtotal: milestone.amount,
+          total: milestone.amount, // Tax calculation would happen here ideally
+          items: {
+            create: [
+              {
+                title: milestone.title,
+                description: milestone.description || `Milestone payment for ${milestone.title}`,
+                quantity: 1,
+                unitPrice: milestone.amount,
+                total: milestone.amount,
+              },
+            ],
+          },
         },
-      },
-    });
-    console.log(`Created auto-invoice for milestone ${milestone.id}`);
-  } catch (e) {
-    console.error("Failed to auto-generate invoice", e);
+      });
+      console.log(`Created auto-invoice for milestone ${milestone.id}`);
+      return;
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002" &&
+        attempt < 2
+      ) {
+        continue;
+      }
+      console.error("Failed to auto-generate invoice", error);
+      return;
+    }
   }
+
+  console.error("Failed to auto-generate invoice after retries", {
+    milestoneId: milestone?.id,
+    workspaceId,
+  });
 }

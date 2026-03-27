@@ -1,15 +1,26 @@
-export type SlackIntent = "create" | "send" | "status" | "help";
+export type SlackIntent = "create" | "setup" | "send" | "status" | "help";
 
 export type CreateInvoiceCommand = {
   intent: "create";
   clientName?: string;
+  projectName?: string;
   amount?: number;
   currency?: string;
   dueDate?: string;
   email?: string;
+  phone?: string;
   itemTitle?: string;
   quantity?: number;
   rate?: number;
+  notes?: string;
+};
+
+export type SetupWorkspaceCommand = {
+  intent: "setup";
+  clientName?: string;
+  projectName?: string;
+  email?: string;
+  phone?: string;
   notes?: string;
 };
 
@@ -29,6 +40,7 @@ export type HelpCommand = {
 
 export type ParsedSlackCommand =
   | CreateInvoiceCommand
+  | SetupWorkspaceCommand
   | SendInvoiceCommand
   | StatusInvoiceCommand
   | HelpCommand;
@@ -123,13 +135,27 @@ export function parseSlackInvoiceCommand(text: string): ParsedSlackCommand {
     return {
       intent: "create",
       clientName: kv.client || kv.customer || inferClientFromSentence(remainder),
+      projectName: kv.project || kv.proj,
       amount,
       currency: normalizeCurrency(kv.currency || kv.curr),
       dueDate: kv.due || kv.duedate,
       email: kv.email || kv.mail,
+      phone: kv.phone || kv.mobile || kv.whatsapp || kv.whats,
       itemTitle: kv.item || kv.desc || kv.description,
       quantity,
       rate,
+      notes: kv.notes || remainder,
+    };
+  }
+
+  if (subcommand === "setup") {
+    const kv = parseKeyValueTokens(remainder);
+    return {
+      intent: "setup",
+      clientName: kv.client || kv.customer || inferClientFromSentence(remainder),
+      projectName: kv.project || kv.proj,
+      email: kv.email || kv.mail,
+      phone: kv.phone || kv.mobile || kv.whatsapp || kv.whats,
       notes: kv.notes || remainder,
     };
   }

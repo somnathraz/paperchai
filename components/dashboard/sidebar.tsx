@@ -1,6 +1,15 @@
 "use client";
 
-import { Home, FileText, Users, Bell, Workflow, BarChart3, Settings } from "lucide-react";
+import {
+  Home,
+  FileText,
+  Users,
+  Bell,
+  Workflow,
+  BarChart3,
+  Settings,
+  FolderKanban,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -8,6 +17,7 @@ const links = [
   { label: "Dashboard", icon: Home, href: "/dashboard" },
   { label: "Invoices", icon: FileText, href: "/invoices" },
   { label: "Clients", icon: Users, href: "/clients" },
+  { label: "Projects", icon: FolderKanban, href: "/projects" },
   { label: "Reminders", icon: Bell, href: "/reminders" },
   { label: "Automation", icon: Workflow, href: "/automation" },
   { label: "Recap", icon: BarChart3, href: "/recap" },

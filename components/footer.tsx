@@ -1,13 +1,13 @@
 // Footer is a Server Component - no client interactivity needed
 import { cn } from "@/lib/utils";
 import { Mail, Twitter, Instagram, Github } from "lucide-react";
+import Link from "next/link";
 
 export function Footer({ className }: { className?: string }) {
-
   return (
     <footer
       className={cn(
-        "mt-20 rounded-3xl border border-white/10 bg-gradient-to-br from-white/70 via-white/40 to-white/20 p-10 shadow-[0_20px_120px_-40px_rgba(0,0,0,0.4)] backdrop-blur-2xl",
+        "mt-12 rounded-3xl border border-white/10 bg-gradient-to-br from-white/70 via-white/40 to-white/20 p-10 shadow-[0_20px_120px_-40px_rgba(0,0,0,0.4)] backdrop-blur-2xl sm:mt-16",
         className
       )}
     >
@@ -19,8 +19,8 @@ export function Footer({ className }: { className?: string }) {
             <span className="text-primary">●</span> PaperChai
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Money Autopilot for freelancers who hate chasing.
-            Trusted by 1,200+ creators, studios, and consultants.
+            Money Autopilot for freelancers who hate chasing. Trusted by 1,200+ creators, studios,
+            and consultants.
           </p>
           {/* Socials */}
           <div className="flex items-center gap-4 pt-2">
@@ -59,7 +59,7 @@ export function Footer({ className }: { className?: string }) {
             <FooterLink label="Help Center" />
             <FooterLink label="Tutorials" />
             <FooterLink label="Security" />
-            <FooterLink label="Contact" />
+            <FooterLink label="Contact" href="/contact-us" />
           </div>
         </div>
       </div>
@@ -71,8 +71,9 @@ export function Footer({ className }: { className?: string }) {
       <div className="flex flex-col items-center justify-between gap-4 text-xs text-muted-foreground sm:flex-row">
         <p>© PaperChai 2025. All rights reserved.</p>
         <div className="flex items-center gap-4">
-          <FooterLink label="Terms" small />
-          <FooterLink label="Privacy" small />
+          <FooterLink label="Terms" href="/terms-and-conditions" small />
+          <FooterLink label="Privacy" href="/privacy-policy" small />
+          <FooterLink label="Refunds" href="/refund-policy" small />
           <FooterLink label="Cookies" small />
         </div>
       </div>
@@ -80,16 +81,24 @@ export function Footer({ className }: { className?: string }) {
   );
 }
 
-function FooterLink({ label, small }: { label: string; small?: boolean }) {
+function FooterLink({
+  label,
+  href = "#",
+  small,
+}: {
+  label: string;
+  href?: string;
+  small?: boolean;
+}) {
   return (
-    <a
-      href="#"
+    <Link
+      href={href}
       className={cn(
         "block text-muted-foreground transition hover:text-primary hover:underline decoration-primary/40",
         small && "text-[11px]"
       )}
     >
       {label}
-    </a>
+    </Link>
   );
 }

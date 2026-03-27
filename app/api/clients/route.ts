@@ -4,9 +4,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { clientCreateSchema } from "@/lib/api-schemas";
 import { assertLimit } from "@/lib/usage";
+import { serializeEntitlementError } from "@/lib/entitlements";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -73,12 +74,23 @@ export async function POST(req: Request) {
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   // Check Limit
   try {
     await assertLimit(workspace.id, session.user.id, "clients");
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 402 }); // Payment Required
+    const serialized = serializeEntitlementError(error);
+    if (serialized) {
+      return NextResponse.json(serialized.body, { status: serialized.status });
+    }
+    return NextResponse.json({ error: error.message }, { status: 402 });
   }
 
   // Validate input with Zod (sanitizes strings automatically)

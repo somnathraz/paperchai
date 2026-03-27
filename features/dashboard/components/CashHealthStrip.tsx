@@ -4,7 +4,10 @@ import { Card } from "@/components/ui/card";
 
 type Kpis = {
   outstandingAmount: number;
+  balanceDueAmount: number;
   collectedMtd: number;
+  collectedAllTime: number;
+  partialPaymentsAmount: number;
   overdueAmount: number;
   avgDaysToPay: number;
   atRiskCount: number;
@@ -49,9 +52,11 @@ export function CashHealthStrip({ kpis, isLoading }: { kpis: Kpis | null; isLoad
       <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
         Cash Collection Health
       </p>
-      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-7">
         {isLoading || !kpis ? (
           <>
+            <div className="h-20 animate-pulse rounded-xl bg-muted/50" />
+            <div className="h-20 animate-pulse rounded-xl bg-muted/50" />
             <div className="h-20 animate-pulse rounded-xl bg-muted/50" />
             <div className="h-20 animate-pulse rounded-xl bg-muted/50" />
             <div className="h-20 animate-pulse rounded-xl bg-muted/50" />
@@ -61,7 +66,10 @@ export function CashHealthStrip({ kpis, isLoading }: { kpis: Kpis | null; isLoad
         ) : (
           <>
             <Metric label="Outstanding" value={formatMoney(kpis.outstandingAmount)} />
+            <Metric label="Balance Due" value={formatMoney(kpis.balanceDueAmount)} />
             <Metric label="Collected MTD" value={formatMoney(kpis.collectedMtd)} />
+            <Metric label="Collected All Time" value={formatMoney(kpis.collectedAllTime)} />
+            <Metric label="Partial Payments" value={formatMoney(kpis.partialPaymentsAmount)} />
             <Metric label="Overdue Amount" value={formatMoney(kpis.overdueAmount)} tone="danger" />
             <Metric label="Avg Days To Pay" value={`${kpis.avgDaysToPay.toFixed(1)}d`} />
             <Metric

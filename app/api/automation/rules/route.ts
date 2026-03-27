@@ -4,11 +4,14 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { z } from "zod";
+import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
+import { assertLimit } from "@/lib/usage";
 
 const RUNNER_SUPPORTED_TRIGGERS = new Set(["MILESTONE_DUE", "INVOICE_OVERDUE"]);
 
 const createAutomationSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).max(255),
   description: z.string().optional(),
   trigger: z.enum([
     "NOTION_STATUS_CHANGE",
@@ -39,7 +42,20 @@ export async function GET() {
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+      return NextResponse.json({
+        automations: [],
+        workspaceReady: false,
+        error: "No workspace found",
+      });
+    }
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "automation");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
     }
 
     const automations = await prisma.automationRule.findMany({
@@ -56,6 +72,7 @@ export async function GET() {
     });
 
     return NextResponse.json({
+      workspaceReady: true,
       automations: automations.map((a) => ({
         id: a.id,
         name: a.name,
@@ -90,10 +107,54 @@ export async function POST(request: NextRequest) {
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "No workspace found", code: "WORKSPACE_NOT_READY" },
+        { status: 409 }
+      );
+    }
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "automation");
+      await assertLimit(workspace.id, session.user.id, "automationRules");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
+    }
+    const canManage = await isWorkspaceApprover(workspace.id, session.user.id);
+    if (!canManage) {
+      return NextResponse.json(
+        { error: "Only workspace owners/admins can manage automation rules" },
+        { status: 403 }
+      );
     }
 
     const validated = createAutomationSchema.parse(await request.json());
+
+    if (
+      (validated.scope === "SELECTED_CLIENTS" || validated.scope === "SPECIFIC_CLIENT") &&
+      validated.scopeValue
+    ) {
+      const clientIds = validated.scopeValue
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+      if (clientIds.length > 0) {
+        const clientsInWorkspace = await prisma.client.count({
+          where: {
+            id: { in: clientIds },
+            workspaceId: workspace.id,
+          },
+        });
+        if (clientsInWorkspace !== clientIds.length) {
+          return NextResponse.json(
+            { error: "Some selected clients are not in this workspace" },
+            { status: 400 }
+          );
+        }
+      }
+    }
 
     if (!RUNNER_SUPPORTED_TRIGGERS.has(validated.trigger)) {
       return NextResponse.json(

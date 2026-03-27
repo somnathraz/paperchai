@@ -76,7 +76,7 @@ export async function sendInvoiceEmail({
     amount: formattedAmount,
     dueDate: formattedDueDate,
     companyName: invoice.workspace.name || "Your Company",
-    paymentLink: buildAppUrl(`/pay/${invoice.id}`),
+    paymentLink: invoice.paymentLinkUrl || buildAppUrl(`/pay/${invoice.id}`),
   };
 
   let emailSubject: string;

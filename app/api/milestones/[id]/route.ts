@@ -4,9 +4,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { generateInvoiceDraftFromMilestone } from "@/lib/projects/invoicing";
-import { MilestoneStatus } from "@prisma/client";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -17,6 +16,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  }
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { id } = await params;

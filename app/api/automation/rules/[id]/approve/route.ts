@@ -3,6 +3,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
 
 const RUNNER_SUPPORTED_TRIGGERS = new Set(["MILESTONE_DUE", "INVOICE_OVERDUE"]);
 
@@ -16,7 +18,27 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "No workspace found", code: "WORKSPACE_NOT_READY" },
+        { status: 409 }
+      );
+    }
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "approvalWorkflows");
+      await assertWorkspaceFeature(workspace.id, session.user.id, "automation");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
+    }
+    const canManage = await isWorkspaceApprover(workspace.id, session.user.id);
+    if (!canManage) {
+      return NextResponse.json(
+        { error: "Only workspace owners/admins can approve automation rules" },
+        { status: 403 }
+      );
     }
 
     const { id } = await params;

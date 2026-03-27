@@ -14,7 +14,7 @@ import { sanitizeForLlm, removeInvisibleUnicode } from "./ai-prompt-security";
 // TIER-BASED CONFIGURATION
 // ================================================================
 
-export type ExtractionTier = "FREE" | "STARTER" | "PROFESSIONAL" | "BUSINESS" | "ENTERPRISE";
+export type ExtractionTier = "FREE" | "PREMIUM" | "PREMIER";
 
 export const EXTRACTION_LIMITS: Record<
   ExtractionTier,
@@ -29,22 +29,12 @@ export const EXTRACTION_LIMITS: Record<
     maxPdfPages: 20,
     maxTextLength: 20000, // ~5,000 tokens
   },
-  STARTER: {
-    maxFileSizeBytes: 8 * 1024 * 1024, // 8 MB
-    maxPdfPages: 35,
-    maxTextLength: 35000, // ~8,750 tokens
-  },
-  PROFESSIONAL: {
+  PREMIUM: {
     maxFileSizeBytes: 15 * 1024 * 1024, // 15 MB
     maxPdfPages: 50,
     maxTextLength: 50000, // ~12,500 tokens
   },
-  BUSINESS: {
-    maxFileSizeBytes: 20 * 1024 * 1024, // 20 MB
-    maxPdfPages: 75,
-    maxTextLength: 75000, // ~18,750 tokens
-  },
-  ENTERPRISE: {
+  PREMIER: {
     maxFileSizeBytes: 25 * 1024 * 1024, // 25 MB
     maxPdfPages: 100,
     maxTextLength: 100000, // ~25,000 tokens

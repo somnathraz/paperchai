@@ -4,6 +4,7 @@
  *
  * Approval-first flow:
  * - /invoice create ... => draft + pending approval request
+ * - /invoice setup ... => create/update client and project only
  * - /invoice send <number> => pending approval request only
  * - /invoice status <number>
  */
@@ -17,6 +18,12 @@ import { slackCommandSchema } from "@/lib/validation/integration-schemas";
 import { parseSlackInvoiceCommand } from "@/lib/integrations/slack/command-parser";
 import { generateWorkspaceInvoiceNumber } from "@/lib/invoices/numbering";
 import { getWorkspaceApprovers } from "@/lib/invoices/approval-routing";
+import {
+  getReconnectMessage,
+  isProviderAuthError,
+  markIntegrationConnectionError,
+} from "@/lib/integrations/connection-health";
+import { assertWorkspaceFeature } from "@/lib/entitlements";
 
 type SlackActor = {
   internalUserId: string;
@@ -34,7 +41,8 @@ type SlackConnectionCandidate = {
 const SLACK_COMMAND_WINDOW_MS = 60 * 1000;
 const SLACK_COMMAND_LIMIT_PER_USER = 30;
 const slackCommandRateLimitStore = new Map<string, { count: number; resetAt: number }>();
-const SLACK_FALLBACK_MAX_CANDIDATES = 5;
+const SLACK_FALLBACK_MAX_CANDIDATES = 1;
+const SLACK_FALLBACK_BUDGET_MS = 1200;
 
 export async function POST(request: NextRequest) {
   let event: { id: string } | null = null;
@@ -151,6 +159,20 @@ export async function POST(request: NextRequest) {
     }
 
     const accessToken = decrypt(connection.accessToken);
+    const authCheck = await testAuth(accessToken);
+    if (!authCheck.ok && isProviderAuthError("SLACK", authCheck.error)) {
+      await markIntegrationConnectionError({
+        connectionId: connection.id,
+        provider: "SLACK",
+        reason: getReconnectMessage("SLACK"),
+      });
+      await finalizeCommandEvent(event.id, "FAILED", command, "Slack connection expired/revoked");
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: getReconnectMessage("SLACK"),
+      });
+    }
+
     const actor = await resolveSlackActor({
       workspaceId: connection.workspaceId,
       externalUserId: user_id,
@@ -174,6 +196,21 @@ export async function POST(request: NextRequest) {
     }
 
     const isReadOnlyActor = actor.role === "VIEWER";
+
+    try {
+      await assertWorkspaceFeature(connection.workspaceId, actor.internalUserId, "integrations");
+    } catch (error) {
+      await finalizeCommandEvent(
+        event.id,
+        "REJECTED",
+        command,
+        "Plan does not allow Slack commands"
+      );
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Slack commands are not available on this workspace plan. Upgrade to Premium or Premier.",
+      });
+    }
 
     if (command.intent === "status") {
       if (!command.invoiceNumber) {
@@ -236,7 +273,7 @@ export async function POST(request: NextRequest) {
           number: command.invoiceNumber,
         },
         include: {
-          client: { select: { name: true, email: true } },
+          client: { select: { name: true, email: true, phone: true, whatsapp: true } },
         },
       });
 
@@ -259,6 +296,20 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           response_type: "ephemeral",
           text: `Invoice ${invoice.number} is already ${invoice.status}.`,
+        });
+      }
+
+      if (!invoice.client?.email) {
+        await finalizeCommandEvent(
+          event.id,
+          "REJECTED",
+          command,
+          "Client email missing for send",
+          invoice.id
+        );
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: `Client email is required before sending ${invoice.number}. Update client contact details first.`,
         });
       }
 
@@ -316,6 +367,86 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (command.intent === "setup") {
+      if (isReadOnlyActor) {
+        await finalizeCommandEvent(
+          event.id,
+          "REJECTED",
+          command,
+          "Viewer role cannot setup client/project"
+        );
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: "Your workspace role is VIEWER. Ask an admin/member to run setup commands.",
+        });
+      }
+
+      const missing: string[] = [];
+      if (!command.clientName) missing.push("client");
+      if (!command.projectName) missing.push("project");
+      if (missing.length > 0) {
+        await finalizeCommandEvent(
+          event.id,
+          "REJECTED",
+          command,
+          `Missing fields: ${missing.join(", ")}`
+        );
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: `Missing fields: ${missing.join(", ")}. Example: /invoice setup client:"Acme" project:"Website Revamp" email:billing@acme.com phone:+919999999999`,
+        });
+      }
+
+      if (command.email && !normalizeEmail(command.email)) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, "Invalid email format");
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: "Invalid email format. Example: email:billing@acme.com",
+        });
+      }
+
+      if (command.phone && !normalizePhone(command.phone)) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, "Invalid phone format");
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: "Invalid phone format. Use digits with optional +country code (example: phone:+919999999999).",
+        });
+      }
+
+      const clientMatch = await findOrCreateClientForCommand({
+        workspaceId: connection.workspaceId,
+        clientName: command.clientName!,
+        email: command.email,
+        phone: command.phone,
+      });
+      if (!clientMatch.ok) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, clientMatch.error);
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: clientMatch.error,
+        });
+      }
+
+      const projectMatch = await findOrCreateProjectForClient({
+        workspaceId: connection.workspaceId,
+        clientId: clientMatch.client.id,
+        projectName: command.projectName!,
+      });
+      if (!projectMatch.ok) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, projectMatch.error);
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: projectMatch.error,
+        });
+      }
+
+      await finalizeCommandEvent(event.id, "EXECUTED", command);
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: `Setup complete: client "${clientMatch.client.name}" and project "${projectMatch.project.name}" are ready.`,
+      });
+    }
+
     // create
     if (isReadOnlyActor) {
       await finalizeCommandEvent(
@@ -331,6 +462,7 @@ export async function POST(request: NextRequest) {
     }
     const missing: string[] = [];
     if (!command.clientName) missing.push("client");
+    if (!command.projectName) missing.push("project");
     if (!command.amount || command.amount <= 0) missing.push("amount");
 
     if (missing.length > 0) {
@@ -342,16 +474,66 @@ export async function POST(request: NextRequest) {
       );
       return NextResponse.json({
         response_type: "ephemeral",
-        text: `Missing fields: ${missing.join(", ")}. Example: /invoice create client:\"Acme\" amount:1200 due:2026-02-28 email:billing@acme.com`,
+        text: `Missing fields: ${missing.join(", ")}. Example: /invoice create client:\"Acme\" project:\"Website Revamp\" amount:1200 due:2026-02-28 email:billing@acme.com`,
       });
     }
 
-    const clientMatch = await findClientByName(connection.workspaceId, command.clientName);
+    if (command.email && !normalizeEmail(command.email)) {
+      await finalizeCommandEvent(event.id, "REJECTED", command, "Invalid email format");
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Invalid email format. Example: email:billing@acme.com",
+      });
+    }
+
+    if (command.phone && !normalizePhone(command.phone)) {
+      await finalizeCommandEvent(event.id, "REJECTED", command, "Invalid phone format");
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Invalid phone format. Use digits with optional +country code (example: phone:+919999999999).",
+      });
+    }
+
+    const clientMatch = await findOrCreateClientForCommand({
+      workspaceId: connection.workspaceId,
+      clientName: command.clientName!,
+      email: command.email,
+      phone: command.phone,
+    });
     if (!clientMatch.ok) {
       await finalizeCommandEvent(event.id, "REJECTED", command, clientMatch.error);
       return NextResponse.json({
         response_type: "ephemeral",
         text: clientMatch.error,
+      });
+    }
+
+    const contactReady = Boolean(
+      clientMatch.client.email || clientMatch.client.phone || clientMatch.client.whatsapp
+    );
+    if (!contactReady) {
+      await finalizeCommandEvent(
+        event.id,
+        "REJECTED",
+        command,
+        "Client contact missing (email/phone)"
+      );
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: `Client ${clientMatch.client.name} has no contact details. Provide email: or phone: in command.`,
+      });
+    }
+
+    const projectMatch = await findOrCreateProjectForClient({
+      workspaceId: connection.workspaceId,
+      clientId: clientMatch.client.id,
+      projectName: command.projectName!,
+    });
+    if (!projectMatch.ok) {
+      await finalizeCommandEvent(event.id, "REJECTED", command, projectMatch.error);
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: projectMatch.error,
       });
     }
 
@@ -391,41 +573,60 @@ export async function POST(request: NextRequest) {
     const rate = command.rate && command.rate > 0 ? command.rate : amount / quantity;
     const subtotal = Number((quantity * rate).toFixed(2));
     const currency = command.currency || "INR";
-    const invoiceNumber = await generateWorkspaceInvoiceNumber(connection.workspaceId);
-
-    const invoice = await prisma.invoice.create({
-      data: {
-        workspaceId: connection.workspaceId,
-        clientId: clientMatch.client.id,
-        number: invoiceNumber,
-        status: "draft",
-        currency,
-        issueDate: now,
-        dueDate,
-        subtotal,
-        taxTotal: 0,
-        total: subtotal,
-        notes: command.notes || "Created via Slack command",
-        source: "slack",
-        sourceImportId: event.id,
-        items: {
-          create: [
-            {
-              title: command.itemTitle || "Services",
-              description: "Generated from Slack command",
-              quantity,
-              unitPrice: rate,
-              taxRate: 0,
-              total: subtotal,
+    const MAX_INVOICE_CREATE_ATTEMPTS = 3;
+    let invoice: {
+      id: string;
+      number: string;
+    } | null = null;
+    for (let attempt = 1; attempt <= MAX_INVOICE_CREATE_ATTEMPTS; attempt += 1) {
+      const invoiceNumber = await generateWorkspaceInvoiceNumber(connection.workspaceId);
+      try {
+        invoice = await prisma.invoice.create({
+          data: {
+            workspaceId: connection.workspaceId,
+            clientId: clientMatch.client.id,
+            projectId: projectMatch.project.id,
+            number: invoiceNumber,
+            status: "draft",
+            currency,
+            issueDate: now,
+            dueDate,
+            subtotal,
+            taxTotal: 0,
+            total: subtotal,
+            notes: command.notes || "Created via Slack command",
+            source: "slack",
+            sourceImportId: event.id,
+            items: {
+              create: [
+                {
+                  title: command.itemTitle || "Services",
+                  description: "Generated from Slack command",
+                  quantity,
+                  unitPrice: rate,
+                  taxRate: 0,
+                  total: subtotal,
+                },
+              ],
             },
-          ],
-        },
-      },
-      select: {
-        id: true,
-        number: true,
-      },
-    });
+          },
+          select: {
+            id: true,
+            number: true,
+          },
+        });
+        break;
+      } catch (error) {
+        const isUniqueConflict =
+          error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+        if (!isUniqueConflict || attempt === MAX_INVOICE_CREATE_ATTEMPTS) {
+          throw error;
+        }
+      }
+    }
+    if (!invoice) {
+      throw new Error("Failed to create invoice");
+    }
 
     await queueInvoiceApproval({
       workspaceId: connection.workspaceId,
@@ -445,7 +646,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       response_type: "ephemeral",
-      text: `Draft ${invoice.number} created for ${clientMatch.client.name} (${currency} ${subtotal.toLocaleString()}) and queued for approval.`,
+      text: `Draft ${invoice.number} created for ${clientMatch.client.name} / ${projectMatch.project.name} (${currency} ${subtotal.toLocaleString()}) and queued for approval.`,
     });
   } catch (error) {
     try {
@@ -493,13 +694,21 @@ async function resolveConnectionBySlackAuth(
   if (candidates.length === 0) return null;
 
   const matched: SlackConnectionCandidate[] = [];
+  const deadline = Date.now() + SLACK_FALLBACK_BUDGET_MS;
   for (const candidate of candidates) {
+    if (Date.now() > deadline) break;
     if (!candidate.accessToken) continue;
     try {
       const token = decrypt(candidate.accessToken);
       const auth = await testAuth(token);
       if (auth.ok && auth.team_id === teamId) {
         matched.push(candidate);
+      } else if (isProviderAuthError("SLACK", auth.error)) {
+        await markIntegrationConnectionError({
+          connectionId: candidate.id,
+          provider: "SLACK",
+          reason: getReconnectMessage("SLACK"),
+        });
       }
     } catch {
       // Ignore invalid candidate token; command flow will continue to other candidates.
@@ -519,6 +728,7 @@ async function resolveConnectionBySlackAuth(
   await prisma.integrationConnection.update({
     where: { id: winner.id },
     data: {
+      status: "CONNECTED",
       providerWorkspaceId: teamId,
       lastError: null,
       lastErrorAt: null,
@@ -810,73 +1020,190 @@ async function queueInvoiceApproval(input: {
   });
 }
 
-async function findClientByName(
-  workspaceId: string,
-  query?: string
-): Promise<
-  | { ok: true; client: { id: string; name: string; email: string | null } }
+async function findOrCreateClientForCommand(input: {
+  workspaceId: string;
+  clientName: string;
+  email?: string;
+  phone?: string;
+}): Promise<
+  | {
+      ok: true;
+      client: {
+        id: string;
+        name: string;
+        email: string | null;
+        phone: string | null;
+        whatsapp: string | null;
+      };
+    }
   | { ok: false; error: string }
 > {
-  if (!query) {
+  const normalizedName = input.clientName.trim();
+  if (!normalizedName) {
     return { ok: false, error: 'Client is required (client:"Name").' };
   }
 
-  const normalized = query.trim();
-  if (!normalized) {
-    return { ok: false, error: 'Client is required (client:"Name").' };
-  }
+  const normalizedEmail = normalizeEmail(input.email);
+  const normalizedPhone = normalizePhone(input.phone);
 
   const exact = await prisma.client.findFirst({
     where: {
-      workspaceId,
-      name: {
-        equals: normalized,
-        mode: "insensitive",
-      },
+      workspaceId: input.workspaceId,
+      name: { equals: normalizedName, mode: "insensitive" },
     },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-    },
+    select: { id: true, name: true, email: true, phone: true, whatsapp: true },
   });
 
   if (exact) {
+    const shouldUpdateEmail = normalizedEmail && !exact.email;
+    const shouldUpdatePhone = normalizedPhone && !exact.phone;
+    const shouldUpdateWhatsapp = normalizedPhone && !exact.whatsapp;
+
+    if (shouldUpdateEmail || shouldUpdatePhone || shouldUpdateWhatsapp) {
+      const updated = await prisma.client.update({
+        where: { id: exact.id },
+        data: {
+          email: shouldUpdateEmail ? normalizedEmail : undefined,
+          phone: shouldUpdatePhone ? normalizedPhone : undefined,
+          whatsapp: shouldUpdateWhatsapp ? normalizedPhone : undefined,
+        },
+        select: { id: true, name: true, email: true, phone: true, whatsapp: true },
+      });
+      return { ok: true, client: updated };
+    }
     return { ok: true, client: exact };
   }
 
   const matches = await prisma.client.findMany({
     where: {
-      workspaceId,
-      name: {
-        contains: normalized,
-        mode: "insensitive",
-      },
+      workspaceId: input.workspaceId,
+      name: { contains: normalizedName, mode: "insensitive" },
     },
     orderBy: { name: "asc" },
     take: 5,
-    select: {
-      id: true,
-      name: true,
-      email: true,
-    },
+    select: { id: true, name: true, email: true, phone: true, whatsapp: true },
   });
 
-  if (matches.length === 1) {
-    return { ok: true, client: matches[0] };
-  }
-
-  if (matches.length === 0) {
+  if (matches.length > 1) {
     return {
       ok: false,
-      error: `Client \"${normalized}\" not found. Create the client first in dashboard.`,
+      error: `Multiple clients matched "${normalizedName}": ${matches.map((m) => m.name).join(", ")}. Use exact client name.`,
     };
   }
 
-  return {
-    ok: false,
-    error: `Multiple clients matched \"${normalized}\": ${matches.map((m) => m.name).join(", ")}. Use exact client name.`,
-  };
+  if (matches.length === 1) {
+    const matched = matches[0];
+    const shouldUpdateEmail = normalizedEmail && !matched.email;
+    const shouldUpdatePhone = normalizedPhone && !matched.phone;
+    const shouldUpdateWhatsapp = normalizedPhone && !matched.whatsapp;
+    if (shouldUpdateEmail || shouldUpdatePhone || shouldUpdateWhatsapp) {
+      const updated = await prisma.client.update({
+        where: { id: matched.id },
+        data: {
+          email: shouldUpdateEmail ? normalizedEmail : undefined,
+          phone: shouldUpdatePhone ? normalizedPhone : undefined,
+          whatsapp: shouldUpdateWhatsapp ? normalizedPhone : undefined,
+        },
+        select: { id: true, name: true, email: true, phone: true, whatsapp: true },
+      });
+      return { ok: true, client: updated };
+    }
+    return { ok: true, client: matched };
+  }
+
+  if (!normalizedEmail && !normalizedPhone) {
+    return {
+      ok: false,
+      error: `Client "${normalizedName}" does not exist. Provide email: or phone: to create client from Slack.`,
+    };
+  }
+
+  const created = await prisma.client.create({
+    data: {
+      workspaceId: input.workspaceId,
+      name: normalizedName,
+      email: normalizedEmail,
+      phone: normalizedPhone,
+      whatsapp: normalizedPhone,
+    },
+    select: { id: true, name: true, email: true, phone: true, whatsapp: true },
+  });
+
+  return { ok: true, client: created };
+}
+
+async function findOrCreateProjectForClient(input: {
+  workspaceId: string;
+  clientId: string;
+  projectName: string;
+}): Promise<{ ok: true; project: { id: string; name: string } } | { ok: false; error: string }> {
+  const normalizedName = input.projectName.trim();
+  if (!normalizedName) {
+    return { ok: false, error: 'Project is required (project:"Name").' };
+  }
+
+  const exact = await prisma.project.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      clientId: input.clientId,
+      name: { equals: normalizedName, mode: "insensitive" },
+    },
+    select: { id: true, name: true },
+  });
+  if (exact) {
+    return { ok: true, project: exact };
+  }
+
+  const matches = await prisma.project.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      clientId: input.clientId,
+      name: { contains: normalizedName, mode: "insensitive" },
+    },
+    orderBy: { name: "asc" },
+    take: 5,
+    select: { id: true, name: true },
+  });
+
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      error: `Multiple projects matched "${normalizedName}": ${matches.map((p) => p.name).join(", ")}. Use exact project name.`,
+    };
+  }
+
+  if (matches.length === 1) {
+    return { ok: true, project: matches[0] };
+  }
+
+  const created = await prisma.project.create({
+    data: {
+      workspaceId: input.workspaceId,
+      clientId: input.clientId,
+      name: normalizedName,
+      status: "ACTIVE",
+    },
+    select: { id: true, name: true },
+  });
+
+  return { ok: true, project: created };
+}
+
+function normalizeEmail(value?: string): string | undefined {
+  if (!value) return undefined;
+  const email = value.trim().toLowerCase();
+  if (!email) return undefined;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return undefined;
+  return email;
+}
+
+function normalizePhone(value?: string): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value.replace(/[^\d+]/g, "").trim();
+  if (!cleaned) return undefined;
+  const digitCount = cleaned.replace(/\D/g, "").length;
+  if (digitCount < 7 || digitCount > 15) return undefined;
+  return cleaned;
 }
 
 function helpResponse() {
@@ -895,8 +1222,24 @@ function helpResponse() {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: '`/invoice create client:"Acme" amount:1200 due:2026-02-28 email:billing@acme.com`\\nCreates draft invoice and queues approval.',
+          text: '`/invoice create client:"Acme" project:"Website Revamp" amount:1200 due:2026-02-28 email:billing@acme.com phone:+919999999999`\\nCreates/updates client + project, drafts invoice, queues approval.',
         },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: '`/invoice setup client:"Acme" project:"Website Revamp" email:billing@acme.com phone:+919999999999`\\nCreates/updates client + project only (no invoice).',
+        },
+      },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text: "Create requires: client, project, amount. For new clients include at least email or phone.",
+          },
+        ],
       },
       {
         type: "section",

@@ -10,10 +10,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getUserTier, TIER_LIMITS } from "@/lib/tier-limits";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { subDays } from "date-fns";
 import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
+import { getWorkspaceEntitlement } from "@/lib/entitlements";
 
 export async function GET(request: NextRequest) {
   try {
@@ -31,11 +31,15 @@ export async function GET(request: NextRequest) {
       console.log("[Integration Status] No workspace for user:", session.user.id);
       return NextResponse.json({
         success: true,
-        tier: "free",
+        tier: "FREE",
+        planCode: "FREE",
         integrationsEnabled: false,
         limits: { maxConnections: 0, importsPerDay: 0, importsPerMinute: 0 },
         usage: { connectionsUsed: 0, importsToday: 0 },
         canManageIntegrations: false,
+        features: {},
+        workspaceRole: null,
+        platformBypass: false,
         autopilot: {
           isConfigured: false,
           status: "OFF",
@@ -54,8 +58,7 @@ export async function GET(request: NextRequest) {
     }
     const workspaceId = workspace.id;
     const canManageIntegrations = await isWorkspaceApprover(workspaceId, session.user.id);
-    const tier = getUserTier(session.user.id, session.user.email);
-    const tierLimits = TIER_LIMITS[tier];
+    const entitlement = await getWorkspaceEntitlement(workspaceId, session.user.id);
 
     // 3. Get all connections for this workspace
     const connections = await prisma.integrationConnection.findMany({
@@ -64,6 +67,7 @@ export async function GET(request: NextRequest) {
         id: true,
         provider: true,
         status: true,
+        accessToken: true,
         providerWorkspaceName: true,
         lastError: true,
         lastErrorAt: true,
@@ -173,24 +177,28 @@ export async function GET(request: NextRequest) {
     // 6. Build response
     const slack = connections.find((c) => c.provider === "SLACK");
     const notion = connections.find((c) => c.provider === "NOTION");
-    const isConfigured =
-      !!(slack?.status === "CONNECTED" || notion?.status === "CONNECTED") ||
-      invoicesWithReminders > 0;
+    const slackConnected = Boolean(slack?.status === "CONNECTED" && slack.accessToken);
+    const notionConnected = Boolean(notion?.status === "CONNECTED" && notion.accessToken);
+    const isConfigured = !!(slackConnected || notionConnected) || invoicesWithReminders > 0;
 
     return NextResponse.json({
       success: true,
-      tier,
-      integrationsEnabled: tierLimits.integrations.enabled,
+      tier: entitlement.planCode,
+      planCode: entitlement.planCode,
+      integrationsEnabled: entitlement.features.integrations,
       limits: {
-        maxConnections: tierLimits.integrations.maxConnections,
-        importsPerDay: tierLimits.integrations.importsPerDay,
-        importsPerMinute: tierLimits.integrations.importsPerMinute,
+        maxConnections: entitlement.limits.integrationsMaxConnections,
+        importsPerDay: entitlement.limits.integrationsImportsPerDay,
+        importsPerMinute: entitlement.limits.integrationsImportsPerMinute,
       },
       usage: {
         connectionsUsed: connections.filter((c) => c.status === "CONNECTED").length,
         importsToday: slackImportCountToday + notionImportCountToday,
       },
       canManageIntegrations,
+      features: entitlement.features,
+      workspaceRole: entitlement.workspaceRole,
+      platformBypass: entitlement.platformBypass,
       // Autopilot stats for automation page
       autopilot: {
         isConfigured,
@@ -206,11 +214,12 @@ export async function GET(request: NextRequest) {
       integrations: {
         slack: slack
           ? {
-              connected: slack.status === "CONNECTED",
+              connected: slackConnected,
               status: slack.status,
               workspaceName: slack.providerWorkspaceName,
               lastError: slack.lastError,
               lastErrorAt: slack.lastErrorAt,
+              reconnectRequired: !slackConnected && Boolean(slack.lastError),
               connectedAt: slack.createdAt,
               // Stats
               channelsWatching: [], // Would need separate table
@@ -223,11 +232,12 @@ export async function GET(request: NextRequest) {
             },
         notion: notion
           ? {
-              connected: notion.status === "CONNECTED",
+              connected: notionConnected,
               status: notion.status,
               workspaceName: notion.providerWorkspaceName,
               lastError: notion.lastError,
               lastErrorAt: notion.lastErrorAt,
+              reconnectRequired: !notionConnected && Boolean(notion.lastError),
               connectedAt: notion.createdAt,
               // Stats
               databasesMapped: databasesMappedCount,

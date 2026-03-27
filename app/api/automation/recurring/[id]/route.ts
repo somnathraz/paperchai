@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { computeNextRunAt } from "@/lib/invoices/recurring-plans";
 import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
 
 const updatePlanSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
@@ -40,7 +41,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+      return NextResponse.json({
+        plan: null,
+        workspaceReady: false,
+        error: "No workspace found",
+      });
+    }
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "recurringPlans");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
     }
     const { id } = await params;
     const plan = await prisma.recurringInvoicePlan.findFirst({
@@ -84,7 +98,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "No workspace found", code: "WORKSPACE_NOT_READY" },
+        { status: 409 }
+      );
+    }
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "recurringPlans");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
     }
     const canManage = await isWorkspaceApprover(workspace.id, session.user.id);
     if (!canManage) {

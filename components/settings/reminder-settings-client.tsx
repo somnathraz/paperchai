@@ -82,7 +82,7 @@ export function ReminderSettingsClient() {
   // For creating new reminders
   const [clients, setClients] = useState<Client[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [selectedClient, setSelectedClient] = useState<string>("");
+  const [selectedClient, setSelectedClient] = useState<string>("all");
   const [selectedInvoice, setSelectedInvoice] = useState<string>("");
   const [showCreateForm, setShowCreateForm] = useState(false);
 
@@ -97,10 +97,9 @@ export function ReminderSettingsClient() {
 
         if (settingsRes.ok) {
           const data = await settingsRes.json();
-          if (data.settings) {
-            setEnabled(data.settings.enabled ?? true);
-            setTimezone(data.settings.timezone || "Asia/Kolkata");
-          }
+          const settings = data.settings || data;
+          setEnabled(settings.enabled ?? true);
+          setTimezone(settings.timezone || "Asia/Kolkata");
         }
 
         if (clientsRes.ok) {
@@ -156,9 +155,10 @@ export function ReminderSettingsClient() {
     }
   };
 
-  const filteredInvoices = selectedClient
-    ? invoices.filter((inv) => inv.clientId === selectedClient)
-    : invoices;
+  const filteredInvoices =
+    selectedClient && selectedClient !== "all"
+      ? invoices.filter((inv) => inv.clientId === selectedClient)
+      : invoices;
 
   if (loading) {
     return (
@@ -195,7 +195,7 @@ export function ReminderSettingsClient() {
                     <SelectValue placeholder="All clients" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All clients</SelectItem>
+                    <SelectItem value="all">All clients</SelectItem>
                     {clients.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.name}

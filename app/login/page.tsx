@@ -25,7 +25,16 @@ export default function LoginPage() {
   const [failedAttempts, setFailedAttempts] = useState(0);
 
   // Use Redux auth state and actions
-  const { login, loginWithGoogle, resendVerification, isLoading, error, status, clearError, clearStatus } = useAuth();
+  const {
+    login,
+    loginWithGoogle,
+    resendVerification,
+    isLoading,
+    error,
+    status,
+    clearError,
+    clearStatus,
+  } = useAuth();
 
   // Auto-redirect if already authenticated
   useAuthRedirect();
@@ -114,7 +123,10 @@ export default function LoginPage() {
 
             <div className="flex items-center justify-between text-sm text-muted-foreground">
               <label className="inline-flex items-center gap-2">
-                <input type="checkbox" className="rounded border-border text-primary focus:ring-primary" />
+                <input
+                  type="checkbox"
+                  className="rounded border-border text-primary focus:ring-primary"
+                />
                 Remember me
               </label>
               <Link href="/forgot-password" className="font-semibold text-primary hover:underline">
@@ -134,7 +146,11 @@ export default function LoginPage() {
               </div>
             )}
 
-            <PrimaryButton type="submit" icon={<ShieldCheck className="h-4 w-4" />} disabled={isLoading || !canSubmit}>
+            <PrimaryButton
+              type="submit"
+              icon={<ShieldCheck className="h-4 w-4" />}
+              disabled={isLoading || !canSubmit}
+            >
               {isLoading ? "Signing in..." : "Sign in"}
             </PrimaryButton>
 
@@ -167,6 +183,21 @@ export default function LoginPage() {
           )}
           <p className="pt-2 text-center text-[11px] text-muted-foreground">
             ✨ 98% users logged in last week • 1,200+ active workspaces
+          </p>
+          <p className="text-center text-[11px] text-muted-foreground">
+            By continuing, you agree to our{" "}
+            <Link href="/terms-and-conditions" className="underline hover:text-primary">
+              Terms
+            </Link>
+            ,{" "}
+            <Link href="/privacy-policy" className="underline hover:text-primary">
+              Privacy Policy
+            </Link>{" "}
+            and{" "}
+            <Link href="/refund-policy" className="underline hover:text-primary">
+              Refund Policy
+            </Link>
+            .
           </p>
         </div>
       </AuthCard>

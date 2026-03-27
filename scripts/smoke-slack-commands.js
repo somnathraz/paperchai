@@ -5,7 +5,7 @@
  * Requires:
  * - Dev server running (npm run dev)
  * - .env with SLACK_SIGNING_SECRET
- * - Seeded TTESTTEAM + UTESTUSER -> workspace; client "Acme" for create
+ * - Seeded TTESTTEAM + UTESTUSER -> workspace
  *
  * Usage: node scripts/smoke-slack-commands.js [baseUrl]
  *        npm run test:slack-commands
@@ -155,7 +155,7 @@ async function main() {
   );
 
   // --- Create: missing amount ---
-  const createNoAmount = await postCommand('create client:"Acme"');
+  const createNoAmount = await postCommand('create client:"Acme" project:"Website"');
   ok(
     "create: missing amount → Missing fields",
     createNoAmount.status === 200 && msg(createNoAmount.data).includes("amount")
@@ -163,7 +163,9 @@ async function main() {
 
   // --- Create: success (draft + approval queued) ---
   let createdInvoiceNumber = null;
-  const createRes = await postCommand('create client:"Acme" amount:100 due:2026-03-01');
+  const createRes = await postCommand(
+    'create client:"Acme" project:"Website" amount:100 due:2026-03-01 email:billing@acme.com'
+  );
   const createMsg = msg(createRes.data);
   if (
     createRes.status === 200 &&

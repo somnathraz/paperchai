@@ -39,6 +39,8 @@ export const API_ENDPOINTS = {
     DETAIL: (id: string) => `/invoices/${id}`,
     PDF: (id: string) => `/invoices/${id}/pdf`,
     STATUS: (id: string) => `/invoices/${id}/status`,
+    PAYMENT: (id: string) => `/invoices/${id}/payment`,
+    RAZORPAY_PAYMENT_LINK: (id: string) => `/invoices/${id}/payment-link/razorpay`,
     REMINDERS: (id: string) => `/invoices/${id}/reminders`,
     DRAFT_REMINDERS: "/invoices/draft-reminders",
     EXTRACT_BILLABLE_ITEMS: (id: string) => `/projects/${id}/extract-billable-items`,
@@ -75,6 +77,7 @@ export const API_ENDPOINTS = {
   REMINDERS: {
     QUEUE: "/reminders/queue",
     SEND: "/reminders/send",
+    ACTION: "/reminders/actions",
     CALENDAR: "/reminders/calendar",
     TIMELINE: (invoiceId: string) => `/reminders/timeline/${invoiceId}`,
   },

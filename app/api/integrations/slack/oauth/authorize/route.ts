@@ -22,13 +22,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 2. Premium Check (Temporarily disabled for development)
-    // const premiumError = await requirePremium(request);
-    // if (premiumError) {
-    //     return NextResponse.redirect(
-    //         new URL("/settings/billing?error=premium_required&feature=slack", request.url)
-    //     );
-    // }
+    // 2. Plan check
+    const premiumError = await requirePremium(request);
+    if (premiumError) {
+      return NextResponse.redirect(
+        new URL("/settings/billing?error=feature_not_available&feature=slack", request.url)
+      );
+    }
 
     // 3. Resolve active workspace and require manager role.
     const workspace = await resolveIntegrationWorkspace(session.user.id, session.user.name);

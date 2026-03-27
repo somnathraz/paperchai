@@ -195,6 +195,21 @@ export default function SignupPage() {
               Sign in
             </Link>
           </p>
+          <p className="text-center text-[11px] text-muted-foreground">
+            By creating an account, you agree to our{" "}
+            <Link href="/terms-and-conditions" className="underline hover:text-primary">
+              Terms
+            </Link>
+            ,{" "}
+            <Link href="/privacy-policy" className="underline hover:text-primary">
+              Privacy Policy
+            </Link>{" "}
+            and{" "}
+            <Link href="/refund-policy" className="underline hover:text-primary">
+              Refund Policy
+            </Link>
+            .
+          </p>
         </div>
       </AuthCard>
     </AuthLayout>

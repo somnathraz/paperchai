@@ -18,9 +18,15 @@ import {
 } from "@/lib/notion-client";
 import { requirePremium, checkDailyImportLimit } from "@/lib/middleware/premium-check";
 import { checkRateLimit } from "@/lib/rate-limiter";
-import { getUserTier } from "@/lib/tier-limits";
 import { notionImportSchema, sanitizeJson } from "@/lib/validation/integration-schemas";
 import { resolveIntegrationWorkspace, requireIntegrationManager } from "@/lib/integrations/access";
+import { getWorkspaceEntitlement } from "@/lib/entitlements";
+import {
+  clearIntegrationConnectionError,
+  getReconnectMessage,
+  isProviderAuthError,
+  markIntegrationConnectionError,
+} from "@/lib/integrations/connection-health";
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,19 +41,19 @@ export async function POST(request: NextRequest) {
     if (premiumError) return premiumError;
 
     // 3. Rate Limiting
-    const tier = getUserTier(session.user.id, session.user.email);
-    const rateLimit = checkRateLimit(request, session.user.id, tier, "integrations");
-
-    if (!rateLimit.allowed) {
-      return NextResponse.json({ error: rateLimit.error }, { status: 429 });
-    }
-
     // 4. Resolve workspace from DB
     const workspace = await resolveIntegrationWorkspace(session.user.id, session.user.name);
     if (!workspace) {
       return NextResponse.json({ error: "No active workspace" }, { status: 400 });
     }
     const workspaceId = workspace.id;
+    const entitlement = await getWorkspaceEntitlement(workspaceId, session.user.id);
+    const planCode = entitlement.platformBypass ? "PREMIER" : entitlement.planCode;
+    const rateLimit = checkRateLimit(request, session.user.id, planCode, "integrations");
+
+    if (!rateLimit.allowed) {
+      return NextResponse.json({ error: rateLimit.error }, { status: 429 });
+    }
     const canManage = await requireIntegrationManager(session.user.id, workspaceId);
     if (!canManage) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -90,7 +96,22 @@ export async function POST(request: NextRequest) {
 
     if (dbResponse.error) {
       console.error("[Notion Import] Query error:", dbResponse.error);
+      if (isProviderAuthError("NOTION", dbResponse.error)) {
+        await markIntegrationConnectionError({
+          connectionId: connection.id,
+          provider: "NOTION",
+          reason: getReconnectMessage("NOTION"),
+        });
+        return NextResponse.json(
+          { error: getReconnectMessage("NOTION"), reconnectRequired: true },
+          { status: 403 }
+        );
+      }
       return NextResponse.json({ error: "Failed to query Notion database" }, { status: 500 });
+    }
+
+    if (connection.lastError) {
+      await clearIntegrationConnectionError(connection.id);
     }
 
     let pages = dbResponse.results || [];

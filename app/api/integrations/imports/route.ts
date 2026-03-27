@@ -11,6 +11,9 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveIntegrationWorkspace } from "@/lib/integrations/access";
 
+const VALID_PROVIDERS = new Set(["slack", "notion", "all"]);
+const VALID_IMPORT_STATUSES = new Set(["PENDING", "PROCESSING", "COMPLETED", "FAILED"]);
+
 export async function GET(request: NextRequest) {
   try {
     // 1. Authentication
@@ -28,14 +31,22 @@ export async function GET(request: NextRequest) {
 
     // 3. Parse query params
     const searchParams = request.nextUrl.searchParams;
-    const provider = searchParams.get("provider"); // slack, notion, or all
-    const status = searchParams.get("status"); // PENDING, PROCESSING, COMPLETED, FAILED
-    const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 100);
+    const provider = searchParams.get("provider")?.toLowerCase() || "all"; // slack, notion, or all
+    const status = searchParams.get("status")?.toUpperCase() || null; // PENDING, PROCESSING, COMPLETED, FAILED
+    const rawLimit = Number.parseInt(searchParams.get("limit") || "20", 10);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 100)) : 20;
     const cursor = searchParams.get("cursor");
+
+    if (!VALID_PROVIDERS.has(provider)) {
+      return NextResponse.json({ error: "Invalid provider filter" }, { status: 422 });
+    }
+    if (status && !VALID_IMPORT_STATUSES.has(status)) {
+      return NextResponse.json({ error: "Invalid status filter" }, { status: 422 });
+    }
 
     // 4. Fetch Slack imports
     let slackImports: any[] = [];
-    if (!provider || provider === "slack" || provider === "all") {
+    if (provider === "slack" || provider === "all") {
       slackImports = await prisma.slackImport.findMany({
         where: {
           connection: { workspaceId },
@@ -64,7 +75,7 @@ export async function GET(request: NextRequest) {
 
     // 5. Fetch Notion imports
     let notionImports: any[] = [];
-    if (!provider || provider === "notion" || provider === "all") {
+    if (provider === "notion" || provider === "all") {
       notionImports = await prisma.notionImport.findMany({
         where: {
           connection: { workspaceId },

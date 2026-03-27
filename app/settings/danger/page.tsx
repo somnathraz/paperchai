@@ -10,70 +10,140 @@ export default async function DangerSettingsPage() {
   }
 
   return (
-    <SettingsLayout current="/settings/danger" title="Danger zone" description="Reset, transfer, or delete your PaperChai workspace.">
+    <SettingsLayout
+      current="/settings/danger"
+      title="Danger zone"
+      description="Reset, transfer, or delete your PaperChai workspace."
+    >
       <div className="space-y-8">
-        <DangerSection title="Workspace" description="Actions that affect your entire PaperChai workspace.">
-          <DangerRow title="Delete workspace" body="Permanently removes reminders, invoices, clients, and AI history. This cannot be undone.">
+        <DangerSection
+          title="Workspace"
+          description="Actions that affect your entire PaperChai workspace."
+        >
+          <DangerRow
+            title="Delete workspace"
+            body="Permanently removes reminders, invoices, clients, and AI history. This cannot be undone."
+          >
             <DangerButton label="Delete workspace" />
           </DangerRow>
-          <DangerRow title="Archive workspace" body="Freeze the workspace without deleting data. Autopilot and reminders pause.">
+          <DangerRow
+            title="Archive workspace"
+            body="Freeze the workspace without deleting data. Autopilot and reminders pause."
+          >
             <DangerButton label="Archive workspace" variant="outline" />
           </DangerRow>
-          <DangerRow title="Transfer workspace ownership" body="Hand off billing, automation, and data control to another member.">
+          <DangerRow
+            title="Transfer workspace ownership"
+            body="Hand off billing, automation, and data control to another member."
+          >
             <DangerButton label="Transfer ownership" variant="outline" />
           </DangerRow>
-          <DangerRow title="Pause reminders globally" body="Immediately stops WhatsApp + email reminders for every client.">
+          <DangerRow
+            title="Pause reminders globally"
+            body="Immediately stops WhatsApp + email reminders for every client."
+          >
             <DangerButton label="Pause reminders" variant="outline" />
           </DangerRow>
         </DangerSection>
 
-        <DangerSection title="Billing" description="High-impact actions for subscription, billing, and payments.">
-          <DangerRow title="Cancel subscription" body="Ends autopilot features at the end of your current billing cycle.">
+        <DangerSection
+          title="Billing"
+          description="High-impact actions for subscription, billing, and payments."
+        >
+          <DangerRow
+            title="Cancel subscription"
+            body="Downgrades the workspace to Free immediately and calculates the refundable unused prepaid amount."
+          >
             <DangerButton label="Cancel subscription" />
           </DangerRow>
-          <DangerRow title="Disable auto-renewal" body="Turn off automatic renewals but keep access until renewal date.">
+          <DangerRow
+            title="Disable auto-renewal"
+            body="Turn off automatic renewals but keep access until renewal date."
+          >
             <DangerButton label="Disable auto-renewal" variant="outline" />
           </DangerRow>
-          <DangerRow title="Downgrade to free plan" body="Remove paid features while keeping workspace data intact.">
+          <DangerRow
+            title="Downgrade to free plan"
+            body="Remove paid features while keeping workspace data intact."
+          >
             <DangerButton label="Downgrade plan" variant="outline" />
           </DangerRow>
         </DangerSection>
 
-        <DangerSection title="Data & logs" description="Control exports and irreversible data resets.">
-          <DangerRow title="Export all data" body="Download invoices, reminders, clients, and AI reliability logs (PDF + CSV + JSON).">
+        <DangerSection
+          title="Data & logs"
+          description="Control exports and irreversible data resets."
+        >
+          <DangerRow
+            title="Export all data"
+            body="Download invoices, reminders, clients, and AI reliability logs (PDF + CSV + JSON)."
+          >
             <DangerButton label="Export workspace data" variant="outline" />
           </DangerRow>
-          <DangerRow title="Clear reminder history" body="Delete reminder delivery logs and transcripts.">
+          <DangerRow
+            title="Clear reminder history"
+            body="Delete reminder delivery logs and transcripts."
+          >
             <DangerButton label="Clear reminder history" variant="outline" />
           </DangerRow>
-          <DangerRow title="Delete clients & invoices" body="Removes every client and invoice record. Use only if starting fresh.">
+          <DangerRow
+            title="Delete clients & invoices"
+            body="Removes every client and invoice record. Use only if starting fresh."
+          >
             <DangerButton label="Delete clients & invoices" />
           </DangerRow>
-          <DangerRow title="Reset reliability model" body="Wipe AI scoring so PaperChai relearns client behavior from scratch.">
+          <DangerRow
+            title="Reset reliability model"
+            body="Wipe AI scoring so PaperChai relearns client behavior from scratch."
+          >
             <DangerButton label="Reset reliability" variant="outline" />
           </DangerRow>
         </DangerSection>
 
-        <DangerSection title="Automation" description="Control PaperChai autopilot engines and integrations.">
-          <DangerRow title="Stop autopilot engines" body="Instantly halt AI reminders, recaps, and follow-ups.">
+        <DangerSection
+          title="Automation"
+          description="Control PaperChai autopilot engines and integrations."
+        >
+          <DangerRow
+            title="Stop autopilot engines"
+            body="Instantly halt AI reminders, recaps, and follow-ups."
+          >
             <DangerButton label="Stop autopilot" />
           </DangerRow>
-          <DangerRow title="Disconnect integrations" body="Disconnect Gmail, WhatsApp, Slack, and Notion connectors.">
+          <DangerRow
+            title="Disconnect integrations"
+            body="Disconnect Gmail, WhatsApp, Slack, and Notion connectors."
+          >
             <DangerButton label="Disconnect all integrations" variant="outline" />
           </DangerRow>
-          <DangerRow title="Reset reminder cadence" body="Reset tones and timing back to PaperChai defaults.">
+          <DangerRow
+            title="Reset reminder cadence"
+            body="Reset tones and timing back to PaperChai defaults."
+          >
             <DangerButton label="Reset cadence" variant="outline" />
           </DangerRow>
         </DangerSection>
 
-        <DangerSection title="Security & access" description="Critical controls for security and team access.">
-          <DangerRow title="Sign out all devices" body="Force sign-out across browser, desktop, and mobile.">
+        <DangerSection
+          title="Security & access"
+          description="Critical controls for security and team access."
+        >
+          <DangerRow
+            title="Sign out all devices"
+            body="Force sign-out across browser, desktop, and mobile."
+          >
             <DangerButton label="Logout all devices" variant="outline" />
           </DangerRow>
-          <DangerRow title="Reset 2FA" body="Disable current authenticator pairing and require new setup.">
+          <DangerRow
+            title="Reset 2FA"
+            body="Disable current authenticator pairing and require new setup."
+          >
             <DangerButton label="Reset 2FA" variant="outline" />
           </DangerRow>
-          <DangerRow title="Remove all members" body="Kick out collaborators and admins (in preparation for transfer).">
+          <DangerRow
+            title="Remove all members"
+            body="Kick out collaborators and admins (in preparation for transfer)."
+          >
             <DangerButton label="Remove members" />
           </DangerRow>
         </DangerSection>
@@ -125,7 +195,15 @@ type DangerButtonProps = {
 
 function DangerButton({ label, variant = "solid" }: DangerButtonProps) {
   if (variant === "outline") {
-    return <button className="rounded-full border border-red-400 px-4 py-2 text-xs font-semibold text-red-700">{label}</button>;
+    return (
+      <button className="rounded-full border border-red-400 px-4 py-2 text-xs font-semibold text-red-700">
+        {label}
+      </button>
+    );
   }
-  return <button className="rounded-full bg-red-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-red-600">{label}</button>;
+  return (
+    <button className="rounded-full bg-red-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-red-600">
+      {label}
+    </button>
+  );
 }

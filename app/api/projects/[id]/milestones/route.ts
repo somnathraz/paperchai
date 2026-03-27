@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -16,12 +16,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const { id } = await params;
   const projectId = id;
 
   // Verify project ownership
-  const project = await prisma.project.findUnique({
+  const project = await prisma.project.findFirst({
     where: { id: projectId, workspaceId: workspace.id },
   });
 

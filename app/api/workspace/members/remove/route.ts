@@ -2,17 +2,21 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { ensureActiveWorkspace } from "@/lib/workspace";
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
-  const workspaceId =
-    (session?.user as any)?.activeWorkspaceId || (session?.user as any)?.workspaceId;
-  if (!session?.user?.id || !workspaceId) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+  const workspaceId = workspace?.id;
+  if (!workspaceId) {
+    return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  }
 
-  const membership = await prisma.workspaceMember.findUnique({
-    where: { workspaceId_userId: { workspaceId, userId: session.user.id } },
+  const membership = await prisma.workspaceMember.findFirst({
+    where: { workspaceId, userId: session.user.id, removedAt: null },
     select: { role: true },
   });
 
@@ -31,9 +35,9 @@ export async function POST(req: Request) {
   if (memberId) {
     const target = await prisma.workspaceMember.findUnique({
       where: { id: memberId },
-      select: { id: true, workspaceId: true, userId: true },
+      select: { id: true, workspaceId: true, userId: true, removedAt: true },
     });
-    if (!target || target.workspaceId !== workspaceId) {
+    if (!target || target.workspaceId !== workspaceId || target.removedAt) {
       return NextResponse.json({ error: "Member not found" }, { status: 404 });
     }
     if (target.userId === session.user.id) {

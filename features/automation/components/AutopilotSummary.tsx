@@ -89,8 +89,8 @@ export const AutopilotSummary = memo(function AutopilotSummary({
   };
 
   return (
-    <Card className="overflow-hidden border-violet-200 dark:border-violet-800 bg-gradient-to-br from-violet-50/50 to-purple-50/50 dark:from-violet-950/20 dark:to-purple-950/20">
-      <div className="p-4 sm:p-6">
+    <Card className="min-w-0 overflow-hidden border-violet-200 dark:border-violet-800 bg-gradient-to-br from-violet-50/50 to-purple-50/50 dark:from-violet-950/20 dark:to-purple-950/20">
+      <div className="p-4 sm:p-6 min-w-0">
         {/* Mobile: Stacked layout */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 lg:gap-6">
           {/* Left: Title, Subtitle, Status */}

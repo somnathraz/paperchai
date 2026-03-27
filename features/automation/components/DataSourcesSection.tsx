@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { Database, MessageSquare, Loader2 } from "lucide-react";
+import { Database, MessageSquare, Loader2, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,61 +81,63 @@ const IntegrationTile = memo(function IntegrationTile({
           : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300";
 
   return (
-    <Card className="p-4 sm:p-5">
-      <div className="flex items-center gap-3 mb-4">
-        <div className={`p-2 rounded-lg ${iconBgColor}`}>
+    <Card className="p-4 sm:p-5 min-w-0 flex flex-col overflow-hidden">
+      <div className="flex items-center gap-3 mb-4 min-w-0">
+        <div className={`shrink-0 p-2 rounded-lg ${iconBgColor}`}>
           <Icon className="w-5 h-5 text-white" />
         </div>
-        <div className="flex-1">
-          <h3 className="font-semibold text-base">{name}</h3>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-base truncate">{name}</h3>
         </div>
-        <Badge variant="outline" className={`${badgeClass} border-0`}>
+        <Badge variant="outline" className={`shrink-0 ${badgeClass} border-0`}>
           {badgeLabel}
         </Badge>
       </div>
 
       {/* Stats or Description */}
       {connected && stats ? (
-        <div className="space-y-2 mb-4">
-          {lastError && <p className="text-xs text-amber-700 dark:text-amber-300">{lastError}</p>}
+        <div className="space-y-2 mb-4 min-w-0">
+          {lastError && (
+            <p className="text-xs text-amber-700 dark:text-amber-300 truncate">{lastError}</p>
+          )}
           {stats.databasesMapped !== undefined && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground truncate">
               {stats.databasesMapped} databases mapped
             </p>
           )}
           {stats.clientsImported !== undefined && stats.projectsImported !== undefined && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground truncate">
               {stats.clientsImported} clients · {stats.projectsImported} projects imported
             </p>
           )}
           {stats.channelsWatching && stats.channelsWatching.length > 0 && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground truncate">
               Watching: {stats.channelsWatching.join(", ")}
             </p>
           )}
           {stats.threadsToProjects !== undefined && stats.draftInvoices !== undefined && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground truncate">
               {stats.threadsToProjects} threads → projects · {stats.draftInvoices} draft invoices
             </p>
           )}
         </div>
       ) : (
-        <ul className="space-y-1 mb-4">
+        <ul className="space-y-1 mb-4 min-w-0">
           {description.map((item, index) => (
-            <li key={index} className="text-sm text-muted-foreground">
+            <li key={index} className="text-sm text-muted-foreground truncate">
               {item}
             </li>
           ))}
         </ul>
       )}
 
-      {/* Actions */}
-      <div className="flex flex-col sm:flex-row gap-2">
+      {/* Actions: wrap and keep inside card; Disconnect as icon-only */}
+      <div className="mt-auto flex flex-wrap gap-2 w-full">
         {!connected && !comingSoon && (
           <Button
             onClick={onConnect}
             disabled={!canManage}
-            className="w-full sm:flex-1 bg-violet-600 hover:bg-violet-700"
+            className="w-full sm:w-auto bg-violet-600 hover:bg-violet-700"
           >
             {canManage ? `Connect ${name}` : "Owner/Admin required"}
           </Button>
@@ -146,24 +148,28 @@ const IntegrationTile = memo(function IntegrationTile({
               onClick={onConfigure}
               disabled={!canManage}
               variant="default"
-              className="w-full sm:flex-1 bg-violet-600 hover:bg-violet-700"
+              size="sm"
+              className="bg-violet-600 hover:bg-violet-700"
             >
               {!canManage
                 ? "Owner/Admin required"
                 : name === "Notion"
                   ? "Map databases"
-                  : "Configure automations"}
+                  : "Configure"}
             </Button>
-            <Button onClick={onViewImports} variant="outline" className="w-full sm:flex-1">
+            <Button onClick={onViewImports} variant="outline" size="sm">
               View imports
             </Button>
             <Button
               onClick={onDisconnect}
               disabled={!canManage}
               variant="destructive"
-              className="w-full sm:flex-1"
+              size="sm"
+              title="Disconnect"
+              aria-label={`Disconnect ${name}`}
+              className="shrink-0 p-2"
             >
-              {canManage ? "Disconnect" : "Owner/Admin required"}
+              <Trash2 className="h-4 w-4" />
             </Button>
           </>
         )}
@@ -221,8 +227,8 @@ export const DataSourcesSection = memo(function DataSourcesSection() {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
+    <div className="space-y-4 min-w-0">
+      <div className="min-w-0">
         <h2 className="text-xl font-semibold mb-1">Data Sources & Imports</h2>
         <p className="text-sm text-muted-foreground">Connect where your work already lives.</p>
         {!canManageIntegrations && (
@@ -233,7 +239,7 @@ export const DataSourcesSection = memo(function DataSourcesSection() {
         )}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 min-w-0">
         {/* Notion Tile */}
         <IntegrationTile
           name="Notion"

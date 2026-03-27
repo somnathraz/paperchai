@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
 
 // GET /api/workspace/settings
 export async function GET() {
@@ -14,8 +15,12 @@ export async function GET() {
   }
 
   try {
+    const activeWorkspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+    if (!activeWorkspace) {
+      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+    }
     const workspace = await prisma.workspace.findUnique({
-      where: { id: (session.user as any).activeWorkspaceId }, // Rely on session ID
+      where: { id: activeWorkspace.id },
       include: { settings: true },
     });
 
@@ -44,6 +49,14 @@ export async function GET() {
       country: settings.currency === "INR" ? "India" : wsParams.country || "India",
       currency: settings.currency || "INR",
       timezone: settings.timezone || "Asia/Kolkata",
+      defaultPaymentMethod: settings.defaultPaymentMethod || "",
+      paymentInstructions: settings.paymentInstructions || "",
+      paymentLinkBaseUrl: settings.paymentLinkBaseUrl || "",
+      upiId: settings.upiId || "",
+      bankAccountName: settings.bankAccountName || "",
+      bankAccountNumber: settings.bankAccountNumber || "",
+      bankIfsc: settings.bankIfsc || "",
+      bankName: settings.bankName || "",
     };
 
     return NextResponse.json(response);
@@ -65,6 +78,13 @@ export async function PATCH(req: Request) {
     if (!workspace) {
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
+    const canManage = await isWorkspaceApprover(workspace.id, session.user.id);
+    if (!canManage) {
+      return NextResponse.json(
+        { error: "Only workspace owners/admins can update workspace settings" },
+        { status: 403 }
+      );
+    }
 
     const body = await req.json();
     const {
@@ -82,6 +102,14 @@ export async function PATCH(req: Request) {
       logo,
       currency,
       timezone,
+      defaultPaymentMethod,
+      paymentInstructions,
+      paymentLinkBaseUrl,
+      upiId,
+      bankAccountName,
+      bankAccountNumber,
+      bankIfsc,
+      bankName,
     } = body;
 
     // Update Workspace (basic fields)
@@ -111,6 +139,14 @@ export async function PATCH(req: Request) {
         timezone: timezone || undefined,
         taxId: taxGstNumber || undefined,
         address: fullAddress || undefined,
+        defaultPaymentMethod: defaultPaymentMethod || undefined,
+        paymentInstructions: paymentInstructions || undefined,
+        paymentLinkBaseUrl: paymentLinkBaseUrl || undefined,
+        upiId: upiId || undefined,
+        bankAccountName: bankAccountName || undefined,
+        bankAccountNumber: bankAccountNumber || undefined,
+        bankIfsc: bankIfsc || undefined,
+        bankName: bankName || undefined,
       },
       create: {
         workspaceId: workspace.id,
@@ -118,6 +154,14 @@ export async function PATCH(req: Request) {
         timezone: timezone || "Asia/Kolkata",
         taxId: taxGstNumber || null,
         address: fullAddress || null,
+        defaultPaymentMethod: defaultPaymentMethod || null,
+        paymentInstructions: paymentInstructions || null,
+        paymentLinkBaseUrl: paymentLinkBaseUrl || null,
+        upiId: upiId || null,
+        bankAccountName: bankAccountName || null,
+        bankAccountNumber: bankAccountNumber || null,
+        bankIfsc: bankIfsc || null,
+        bankName: bankName || null,
       },
     });
 
@@ -129,6 +173,14 @@ export async function PATCH(req: Request) {
         // logo: logo,
         currency: updatedSettings.currency,
         timezone: updatedSettings.timezone,
+        defaultPaymentMethod: updatedSettings.defaultPaymentMethod,
+        paymentInstructions: updatedSettings.paymentInstructions,
+        paymentLinkBaseUrl: updatedSettings.paymentLinkBaseUrl,
+        upiId: updatedSettings.upiId,
+        bankAccountName: updatedSettings.bankAccountName,
+        bankAccountNumber: updatedSettings.bankAccountNumber,
+        bankIfsc: updatedSettings.bankIfsc,
+        bankName: updatedSettings.bankName,
       },
     });
   } catch (error) {

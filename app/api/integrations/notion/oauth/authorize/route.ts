@@ -22,13 +22,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 2. Premium Check (Temporarily disabled for development)
-    // const premiumError = await requirePremium(request);
-    // if (premiumError) {
-    //     return NextResponse.redirect(
-    //         new URL("/settings/billing?error=premium_required&feature=notion", request.url)
-    //     );
-    // }
+    // 2. Plan check
+    const premiumError = await requirePremium(request);
+    if (premiumError) {
+      return NextResponse.redirect(
+        new URL("/settings/billing?error=feature_not_available&feature=notion", request.url)
+      );
+    }
     // 3. Get or create workspace
     const { ensureActiveWorkspace } = await import("@/lib/workspace");
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);

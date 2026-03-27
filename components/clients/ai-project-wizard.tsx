@@ -215,12 +215,6 @@ export function AiProjectWizard({
           milestones: extract.confidence?.milestones || 0,
         },
         warnings: extract.warnings || [],
-        sourceDocument: {
-          fileKey: "temp/" + file.name,
-          fileName: file.name,
-          mimeType: file.type,
-          size: file.size,
-        },
       });
 
       setStep("review");

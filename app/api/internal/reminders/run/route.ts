@@ -161,6 +161,17 @@ export async function POST(req: NextRequest) {
           },
           nextRetryAt: shouldRetry ? retryAt.toISOString() : null,
         });
+        await prisma.reminderHistory.create({
+          data: {
+            workspaceId: workspace.id,
+            clientId: client.id,
+            invoiceId: invoice.id,
+            channel: "email",
+            kind: "reminder",
+            status: "failed",
+            sentAt: new Date(),
+          },
+        });
         results.push({ id: step.id, status: "FAILED", reason: "No client email" });
         continue;
       }
@@ -174,6 +185,17 @@ export async function POST(req: NextRequest) {
           lastStepId: step.id,
           lastStatus: "FAILED",
           lastError: "Template not found",
+        });
+        await prisma.reminderHistory.create({
+          data: {
+            workspaceId: workspace.id,
+            clientId: client.id,
+            invoiceId: invoice.id,
+            channel: "email",
+            kind: "reminder",
+            status: "failed",
+            sentAt: new Date(),
+          },
         });
         results.push({ id: step.id, status: "FAILED", reason: "Template missing" });
         continue;
@@ -192,7 +214,7 @@ export async function POST(req: NextRequest) {
         amount: formattedAmount,
         dueDate: formattedDueDate,
         companyName: workspace.name,
-        paymentLink: buildAppUrl(`/pay/${invoice.id}`),
+        paymentLink: invoice.paymentLinkUrl || buildAppUrl(`/pay/${invoice.id}`),
       };
 
       const subject = replaceTemplateVariables(template.subject, vars);

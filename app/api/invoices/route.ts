@@ -4,10 +4,12 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { assertLimit, incrementUsage } from "@/lib/usage";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { isValidInvoiceDateOrder } from "@/lib/invoices/workflow-validation";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
 
 const createInvoiceSchema = z.object({
   clientId: z.string().cuid(),
@@ -33,11 +35,22 @@ export async function POST(req: Request) {
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   // Check Limit
   try {
-    await assertLimit(workspace.id, session.user.id, "invoices_per_month");
+    await assertLimit(workspace.id, session.user.id, "invoicesPerMonth");
   } catch (error: any) {
+    const serialized = serializeEntitlementError(error);
+    if (serialized) {
+      return NextResponse.json(serialized.body, { status: serialized.status });
+    }
     return NextResponse.json({ error: error.message }, { status: 402 });
   }
 
@@ -105,42 +118,65 @@ export async function POST(req: Request) {
   const template = templateSlug
     ? await prisma.invoiceTemplate.findFirst({
         where: { slug: templateSlug },
-        select: { id: true },
+        select: { id: true, isPro: true },
       })
     : null;
 
-  const invoice = await prisma.invoice.create({
-    data: {
-      workspaceId: workspace.id,
-      clientId,
-      projectId,
-      templateId: template?.id,
-      number,
-      status: "draft",
-      issueDate: issueDateObj,
-      dueDate: dueDateObj,
-      currency,
-      notes,
-      terms,
-      reminderTone,
-      subtotal: 0,
-      total: 0,
-      items: {
-        create: items.map((item: any) => ({
-          title: item.title,
-          description: item.description,
-          quantity: item.quantity ?? 1,
-          unitPrice: item.unitPrice ?? 0,
-          taxRate: item.taxRate ?? 0,
-          total: item.total ?? 0,
-        })),
+  if (template?.isPro) {
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "customBranding");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
+    }
+  }
+
+  let invoice;
+  try {
+    invoice = await prisma.invoice.create({
+      data: {
+        workspaceId: workspace.id,
+        clientId,
+        projectId,
+        templateId: template?.id,
+        number,
+        status: "draft",
+        issueDate: issueDateObj,
+        dueDate: dueDateObj,
+        currency,
+        notes,
+        terms,
+        reminderTone,
+        subtotal: 0,
+        total: 0,
+        items: {
+          create: items.map((item: any) => ({
+            title: item.title,
+            description: item.description,
+            quantity: item.quantity ?? 1,
+            unitPrice: item.unitPrice ?? 0,
+            taxRate: item.taxRate ?? 0,
+            total: item.total ?? 0,
+          })),
+        },
       },
-    },
-    include: { items: true },
-  });
+      include: { items: true },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return NextResponse.json(
+        { error: "Invoice number already exists in this workspace" },
+        { status: 409 }
+      );
+    }
+    throw error;
+  }
 
   // Track Usage
-  await incrementUsage(workspace.id, "invoices_per_month");
+  await incrementUsage(workspace.id, "invoicesPerMonth");
 
   return NextResponse.json({ invoice });
 }

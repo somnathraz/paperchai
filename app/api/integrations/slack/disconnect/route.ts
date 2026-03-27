@@ -10,8 +10,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limiter";
-import { getUserTier } from "@/lib/tier-limits";
 import { resolveIntegrationWorkspace, requireIntegrationManager } from "@/lib/integrations/access";
+import { getWorkspaceEntitlement } from "@/lib/entitlements";
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,17 +22,21 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Rate Limiting
-    const tier = getUserTier(session.user.id, session.user.email);
-    const rateLimit = checkRateLimit(request, session.user.id, tier, "general");
-
-    if (!rateLimit.allowed) {
-      return NextResponse.json({ error: rateLimit.error }, { status: 429 });
-    }
-
-    // 3. Resolve workspace and require manager role.
+    // 2. Resolve workspace and require manager role.
     const workspace = await resolveIntegrationWorkspace(session.user.id, session.user.name);
     if (!workspace) {
       return NextResponse.json({ error: "No active workspace" }, { status: 400 });
+    }
+    const entitlement = await getWorkspaceEntitlement(workspace.id, session.user.id);
+    const rateLimit = checkRateLimit(
+      request,
+      session.user.id,
+      entitlement.platformBypass ? "PREMIER" : entitlement.planCode,
+      "general"
+    );
+
+    if (!rateLimit.allowed) {
+      return NextResponse.json({ error: rateLimit.error }, { status: 429 });
     }
     const canManage = await requireIntegrationManager(session.user.id, workspace.id);
     if (!canManage) {

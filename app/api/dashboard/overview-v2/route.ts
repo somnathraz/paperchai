@@ -27,7 +27,10 @@ export async function GET() {
         actionQueue: [],
         kpis: {
           outstandingAmount: 0,
+          balanceDueAmount: 0,
           collectedMtd: 0,
+          collectedAllTime: 0,
+          partialPaymentsAmount: 0,
           overdueAmount: 0,
           avgDaysToPay: 0,
           atRiskCount: 0,
@@ -69,6 +72,7 @@ export async function GET() {
             updatedAt: true,
             scheduledSendAt: true,
             total: true,
+            amountPaid: true,
             currency: true,
             sendMeta: true,
             client: { select: { name: true } },
@@ -204,8 +208,22 @@ export async function GET() {
     const paidMtd = invoices.filter((i) => i.status === "paid" && i.updatedAt >= monthStart);
 
     const outstandingAmount = outstandingInvoices.reduce((sum, i) => sum + Number(i.total || 0), 0);
-    const overdueAmount = overdueInvoices.reduce((sum, i) => sum + Number(i.total || 0), 0);
+    const balanceDueAmount = outstandingInvoices.reduce(
+      (sum, i) => sum + Math.max(0, Number(i.total || 0) - Number(i.amountPaid || 0)),
+      0
+    );
+    const partialPaymentsAmount = outstandingInvoices.reduce(
+      (sum, i) => sum + Number(i.amountPaid || 0),
+      0
+    );
+    const overdueAmount = overdueInvoices.reduce(
+      (sum, i) => sum + Math.max(0, Number(i.total || 0) - Number(i.amountPaid || 0)),
+      0
+    );
     const collectedMtd = paidMtd.reduce((sum, i) => sum + Number(i.total || 0), 0);
+    const collectedAllTime = invoices
+      .filter((i) => i.status === "paid")
+      .reduce((sum, i) => sum + Number(i.total || 0), 0);
     const avgDaysToPay =
       paidRecent.length === 0
         ? 0
@@ -246,7 +264,10 @@ export async function GET() {
       actionQueue,
       kpis: {
         outstandingAmount,
+        balanceDueAmount,
         collectedMtd,
+        collectedAllTime,
+        partialPaymentsAmount,
         overdueAmount,
         avgDaysToPay,
         atRiskCount,

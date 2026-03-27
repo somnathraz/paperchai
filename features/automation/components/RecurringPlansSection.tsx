@@ -181,6 +181,7 @@ export function RecurringPlansSection({ compact = false }: Props) {
   const [invoiceTemplates, setInvoiceTemplates] = useState<InvoiceTemplateOption[]>([]);
   const [invoicesForTemplate, setInvoicesForTemplate] = useState<InvoiceOption[]>([]);
   const [loadingInvoiceDetails, setLoadingInvoiceDetails] = useState(false);
+  const [confirmDeletePlanId, setConfirmDeletePlanId] = useState<string | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
@@ -191,6 +192,14 @@ export function RecurringPlansSection({ compact = false }: Props) {
   const [historyRuns, setHistoryRuns] = useState<RecurringRun[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  const getRecurringErrorMessage = (payload: any, fallback: string) => {
+    if (payload?.code === "WORKSPACE_NOT_READY" || payload?.error === "No workspace found") {
+      return "Workspace is still loading. Please wait a moment and try again.";
+    }
+    if (payload?.error) return payload.error;
+    return fallback;
+  };
+
   const updateForm = (patch: Partial<PlanFormState>) =>
     setFormState((prev) => ({ ...prev, ...patch }));
 
@@ -199,7 +208,14 @@ export function RecurringPlansSection({ compact = false }: Props) {
       setLoading(true);
       const res = await fetch("/api/automation/recurring");
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to load recurring plans");
+      if (!res.ok) {
+        const isWorkspaceBootstrapState = data?.error === "No workspace found";
+        if (isWorkspaceBootstrapState) {
+          setPlans([]);
+          return;
+        }
+        throw new Error(data.error || "Failed to load recurring plans");
+      }
       setPlans(data.plans || []);
     } catch (error) {
       console.error("Failed to fetch recurring plans:", error);
@@ -335,7 +351,7 @@ export function RecurringPlansSection({ compact = false }: Props) {
     try {
       const res = await fetch(`/api/automation/recurring/${plan.id}`);
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to load history");
+      if (!res.ok) throw new Error(getRecurringErrorMessage(data, "Failed to load history"));
       setHistoryRuns(data.plan?.runs || []);
     } catch (error) {
       console.error("Failed to load recurring plan history:", error);
@@ -354,7 +370,8 @@ export function RecurringPlansSection({ compact = false }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      if (!res.ok) throw new Error("Failed to update plan");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getRecurringErrorMessage(data, "Failed to update plan"));
       await fetchPlans();
       toast.success(nextStatus === "ACTIVE" ? "Plan resumed" : "Plan paused");
     } catch (error) {
@@ -382,21 +399,19 @@ export function RecurringPlansSection({ compact = false }: Props) {
   };
 
   const deletePlan = async (plan: RecurringPlan) => {
-    // eslint-disable-next-line no-alert -- confirm is intentional for delete
-    if (
-      !confirm(
-        `Delete recurring plan "${plan.name}"? It will be removed from the list and will no longer run.`
-      )
-    ) {
+    if (confirmDeletePlanId !== plan.id) {
+      setConfirmDeletePlanId(plan.id);
       return;
     }
+    setConfirmDeletePlanId(null);
     try {
       const res = await fetch(`/api/automation/recurring/${plan.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "ARCHIVED" }),
       });
-      if (!res.ok) throw new Error("Failed to delete plan");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getRecurringErrorMessage(data, "Failed to delete plan"));
       await fetchPlans();
       toast.success("Recurring plan deleted");
       if (historyOpen && historyPlan?.id === plan.id) {
@@ -490,7 +505,7 @@ export function RecurringPlansSection({ compact = false }: Props) {
         body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to save plan");
+      if (!res.ok) throw new Error(getRecurringErrorMessage(data, "Failed to save plan"));
 
       toast.success(formMode === "edit" ? "Recurring plan updated" : "Recurring plan created");
       setFormOpen(false);
@@ -504,7 +519,7 @@ export function RecurringPlansSection({ compact = false }: Props) {
   };
 
   return (
-    <section className="rounded-2xl border border-border/60 bg-white p-4 sm:p-6 space-y-4">
+    <section className="rounded-2xl border border-border/60 bg-white p-4 sm:p-6 space-y-4 min-w-0 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-base font-semibold text-foreground">Recurring Invoice Plans</h3>
@@ -842,13 +857,20 @@ export function RecurringPlansSection({ compact = false }: Props) {
                   </Button>
                   <Button
                     size="sm"
-                    variant="outline"
+                    variant={confirmDeletePlanId === plan.id ? "destructive" : "outline"}
                     onClick={() => deletePlan(plan)}
-                    className="text-destructive hover:text-destructive hover:border-destructive/50"
-                    title="Delete recurring plan"
+                    className={cn(
+                      confirmDeletePlanId !== plan.id &&
+                        "text-destructive hover:text-destructive hover:border-destructive/50"
+                    )}
+                    title={
+                      confirmDeletePlanId === plan.id
+                        ? "Click again to confirm deletion"
+                        : "Delete recurring plan"
+                    }
                   >
                     <Trash2 className="h-4 w-4 mr-1" />
-                    Delete
+                    {confirmDeletePlanId === plan.id ? "Confirm Delete?" : "Delete"}
                   </Button>
                 </div>
               </div>

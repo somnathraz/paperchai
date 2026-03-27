@@ -13,6 +13,8 @@ export type DashboardStats = {
   averagePaymentTime: number;
   reliability: number;
   outstandingAmount: number;
+  balanceDueAmount: number;
+  partialPaymentsAmount: number;
   collectedSparkline: number[];
   outstandingSparkline: number[];
   payoutSparkline: number[];
@@ -47,6 +49,8 @@ export type RecentInvoice = {
   due: string;
   channel: string[];
   displayStatus: string;
+  amountPaid?: number;
+  balanceDue?: number;
 };
 
 export const dashboardService = {

@@ -18,7 +18,7 @@ import { ensureActiveWorkspace } from "@/lib/workspace";
 import { sendEmail } from "@/lib/email";
 import { buildAppUrl } from "@/lib/app-url";
 import { z } from "zod";
-import { getWorkspaceApprovers } from "@/lib/invoices/approval-routing";
+import { getWorkspaceApprovers, isWorkspaceApprover } from "@/lib/invoices/approval-routing";
 
 // Days before due date to send reminders
 const REMINDER_DAYS_BEFORE = [7, 3, 1];
@@ -160,6 +160,13 @@ export async function POST(req: NextRequest) {
   const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  }
+  const canTrigger = await isWorkspaceApprover(workspace.id, session.user.id);
+  if (!canTrigger) {
+    return NextResponse.json(
+      { error: "Only workspace owners/admins can trigger draft reminders" },
+      { status: 403 }
+    );
   }
 
   try {

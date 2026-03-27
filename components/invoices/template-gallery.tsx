@@ -220,7 +220,7 @@ export function TemplateGallery({ firstName, templates, variant = "full" }: Temp
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {sorted.map((template) => {
             const isAvailable = template.slug === "classic-gray";
-            const tag = template.isPro ? "Pro" : "Free";
+            const tag = template.isPro ? "Premium" : "Free";
             const tagBadge = (template.tags || "").split(",")[0]?.trim();
             return (
               <article
@@ -244,7 +244,7 @@ export function TemplateGallery({ firstName, templates, variant = "full" }: Temp
                     </div>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        tag === "Pro"
+                        tag === "Premium"
                           ? "bg-amber-100 text-amber-700"
                           : "bg-emerald-100 text-emerald-700"
                       }`}

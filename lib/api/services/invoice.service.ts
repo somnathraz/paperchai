@@ -26,6 +26,15 @@ export type ScheduleInvoicePayload = {
   reminderCadence?: string;
 };
 
+export type RecordPaymentPayload = {
+  invoiceId: string;
+  amount: number;
+  paidAt?: string;
+  paymentMethod?: string;
+  paymentReference?: string;
+  paymentNote?: string;
+};
+
 export const invoiceService = {
   /**
    * Get all invoices
@@ -67,5 +76,14 @@ export const invoiceService = {
    */
   updateStatus: async (invoiceId: string, status: string) => {
     return apiClient.patch(API_ENDPOINTS.INVOICES.STATUS(invoiceId), { status });
+  },
+
+  recordPayment: async (payload: RecordPaymentPayload) => {
+    const { invoiceId, ...body } = payload;
+    return apiClient.post(API_ENDPOINTS.INVOICES.PAYMENT(invoiceId), body);
+  },
+
+  generateRazorpayPaymentLink: async (invoiceId: string) => {
+    return apiClient.post(API_ENDPOINTS.INVOICES.RAZORPAY_PAYMENT_LINK(invoiceId));
   },
 };

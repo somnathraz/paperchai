@@ -11,7 +11,12 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateContentSafe } from "@/lib/ai-service";
 import { AI_CONFIG } from "@/lib/ai-config";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
+import {
+  assertWorkspaceFeature,
+  getWorkspaceEntitlement,
+  serializeEntitlementError,
+} from "@/lib/entitlements";
 
 const SYSTEM_PROMPT = `You are PaperChai AI, an expert at extracting business data from Notion pages.
 
@@ -88,6 +93,24 @@ export async function POST(request: NextRequest) {
     if (!workspace) {
       return NextResponse.json({ success: false, error: "No active workspace" }, { status: 400 });
     }
+    const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+    if (!membership) {
+      return NextResponse.json(
+        { success: false, error: "Workspace access denied" },
+        { status: 403 }
+      );
+    }
+    if (!canWriteWorkspace(membership.role)) {
+      return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+    }
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "ai");
+      await assertWorkspaceFeature(workspace.id, session.user.id, "integrations");
+    } catch (error) {
+      return NextResponse.json(serializeEntitlementError(error), {
+        status: (error as any)?.statusCode || 403,
+      });
+    }
 
     const body: ExtractRequest = await request.json();
 
@@ -121,6 +144,7 @@ ${body.textContent || "No additional content"}
 Extract the relevant data for this ${body.importType} import. If type is AUTO, decide best fit (Project vs Client).`;
 
     // Call Gemini AI
+    const entitlement = await getWorkspaceEntitlement(workspace.id, session.user.id);
     const response = await generateContentSafe({
       modelName: AI_CONFIG.features.extraction.model,
       fallbackModelName: AI_CONFIG.features.extraction.fallback,
@@ -132,7 +156,7 @@ Extract the relevant data for this ${body.importType} import. If type is AUTO, d
       },
       promptParts: [{ text: prompt }],
       userId: "system",
-      userTier: "PREMIUM",
+      userTier: entitlement.platformBypass ? "PREMIER" : entitlement.planCode,
     });
 
     // Parse AI response

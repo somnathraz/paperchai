@@ -155,6 +155,8 @@ model Workspace {
   botCommandEvents BotCommandEvent[]
   approvalRequests ApprovalRequest[]
   outboundMessageLogs OutboundMessageLog[]
+  webhookEvents   WebhookEvent[]
+  paymentEvents   PaymentEvent[]
 
   // Legacy Fields for Migration (Do not use in new code)
   ownerId         String?
@@ -191,6 +193,14 @@ model WorkspaceSettings {
 
   defaultPaymentTerms String? // Net 15/30
   defaultReminderTone String? // Warm/Firm etc.
+  defaultPaymentMethod String?
+  paymentInstructions  String?
+  paymentLinkBaseUrl   String?
+  upiId                String?
+  bankAccountName      String?
+  bankAccountNumber    String?
+  bankIfsc             String?
+  bankName             String?
   
   // Migration targets (Old fields that were on Workspace)
   pan             String?
@@ -309,6 +319,7 @@ model Subscription {
 
   workspace           Workspace @relation(fields: [workspaceId], references: [id])
   plan                SubscriptionPlan @relation(fields: [planId], references: [id])
+  paymentEvents       PaymentEvent[]
 
   @@index([status])
   @@index([currentPeriodEnd])
@@ -548,6 +559,14 @@ model Invoice {
   notes        String?
   terms        String?
   reminderTone String?        @default("Warm + Polite")
+  paymentMethod String?
+  paymentInstructions String?
+  paymentLinkUrl String?
+  allowPartialPayments Boolean @default(false)
+  amountPaid    Decimal       @default(0)
+  paidAt        DateTime?
+  paymentReference String?
+  paymentNote   String?
   
   // Source tracking (for Slack/Notion imports)
   source       String?        // "slack", "notion", "manual", "api"
@@ -560,11 +579,18 @@ model Invoice {
   reminders    ReminderHistory[]
   recurringRuns RecurringInvoiceRunLog[]
   botCommandEvents BotCommandEvent[]
+  webhookEvents WebhookEvent[]
+  paymentEvents PaymentEvent[]
   remindersEnabled Boolean        @default(false)
   reminderSchedule InvoiceReminderSchedule?
   approvalRequests ApprovalRequest[]
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
+
+  @@unique([workspaceId, number])
+  @@index([workspaceId, status, dueDate])
+  @@index([workspaceId, status, scheduledSendAt])
+  @@index([workspaceId, createdAt])
 }
 
 model InvoiceItem {
@@ -742,6 +768,8 @@ model InvoiceReminderStep {
   lastError       String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@index([status, sendAt])
 }
 
 model EmailTemplate {
@@ -1266,6 +1294,65 @@ model OutboundMessageLog {
 
   @@index([workspaceId, provider, createdAt])
   @@index([provider, status, createdAt])
+}
+
+model WebhookEvent {
+  id                String   @id @default(cuid())
+  provider          String
+  eventType         String
+  eventKey          String   @unique
+  externalEventId   String?
+  externalPaymentId String?
+  externalLinkId    String?
+  externalRefundId  String?
+  workspaceId       String?
+  invoiceId         String?
+  status            String
+  reason            String?
+  signature         String?
+  payload           Json?
+  result            Json?
+  processedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace         Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  invoice           Invoice?   @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([provider, eventType, createdAt])
+  @@index([workspaceId, status, createdAt])
+  @@index([invoiceId, status, createdAt])
+}
+
+model PaymentEvent {
+  id                String   @id @default(cuid())
+  provider          String
+  eventType         String
+  eventKey          String   @unique
+  direction         String
+  externalPaymentId String?
+  externalLinkId    String?
+  externalRefundId  String?
+  workspaceId       String?
+  invoiceId         String?
+  subscriptionId    String?
+  amount            Int?
+  currency          String?
+  status            String
+  metadata          Json?
+  processedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace         Workspace?    @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  invoice           Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  subscription      Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([provider, direction, createdAt])
+  @@index([externalPaymentId])
+  @@index([externalRefundId])
+  @@index([workspaceId, status, createdAt])
+  @@index([invoiceId, status, createdAt])
 }
 
 // --- Security Audit Log ---

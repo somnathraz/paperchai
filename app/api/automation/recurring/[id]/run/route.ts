@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { runRecurringPlan } from "@/lib/invoices/recurring-runner";
 import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -16,7 +17,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "No workspace found", code: "WORKSPACE_NOT_READY" },
+        { status: 409 }
+      );
+    }
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "recurringPlans");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
     }
     const canManage = await isWorkspaceApprover(workspace.id, session.user.id);
     if (!canManage) {

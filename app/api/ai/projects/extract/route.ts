@@ -13,10 +13,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { AI_CONFIG } from "@/lib/ai-config";
 import { generateAI } from "@/lib/unified-ai-service";
-import { getUserTier, TIER_LIMITS } from "@/lib/tier-limits";
+import { TIER_LIMITS } from "@/lib/tier-limits";
 import {
   processAiInput,
   validateAiOutput,
@@ -35,6 +35,11 @@ import {
   EXTRACTION_LIMITS,
   ExtractionTier,
 } from "@/lib/document-extraction";
+import {
+  assertWorkspaceFeature,
+  getWorkspaceEntitlement,
+  serializeEntitlementError,
+} from "@/lib/entitlements";
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
@@ -53,13 +58,28 @@ export async function POST(req: NextRequest) {
     if (!workspace) {
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
+    const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+    if (!membership) {
+      return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+    }
+    if (!canWriteWorkspace(membership.role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     workspaceId = workspace.id;
 
-    const userTier = getUserTier(session.user.id, session.user.email || "");
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "ai");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
+    }
+    const entitlement = await getWorkspaceEntitlement(workspace.id, session.user.id);
+    const userTier = entitlement.platformBypass ? "PREMIER" : entitlement.planCode;
     const limits = TIER_LIMITS[userTier];
-    const extractionTier = (
-      userTier === "OWNER" ? "PROFESSIONAL" : userTier === "PREMIUM" ? "PROFESSIONAL" : "FREE"
-    ) as ExtractionTier;
+    const extractionTier = (userTier === "PREMIER" ? "PREMIER" : userTier) as ExtractionTier;
 
     // 3. Parse request
     const body = await req.json();
@@ -169,9 +189,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 8. Check budget/cache
-    const budgetTier = (
-      userTier === "PREMIUM" || userTier === "OWNER" ? "PROFESSIONAL" : "FREE"
-    ) as AiBudgetTier;
+    const budgetTier = userTier as AiBudgetTier;
     const guard = await checkAiGuard(
       workspaceId,
       processed.contentHash,

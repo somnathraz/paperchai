@@ -8,7 +8,7 @@ import crypto from "crypto";
 import { encrypt, decrypt } from "@/lib/encryption";
 
 const SLACK_API_BASE = "https://slack.com/api";
-const SLACK_REQUEST_TIMEOUT_MS = 1200;
+const SLACK_REQUEST_TIMEOUT_MS = 900;
 
 // ===== Slack Signature Verification =====
 

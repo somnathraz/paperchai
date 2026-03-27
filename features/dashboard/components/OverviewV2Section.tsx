@@ -6,12 +6,16 @@ import { ActionQueueCard, ActionQueueItem } from "./ActionQueueCard";
 import { CashHealthStrip } from "./CashHealthStrip";
 import { InvoicePipelineBoard } from "./InvoicePipelineBoard";
 import { AutomationReliabilityCard } from "./AutomationReliabilityCard";
+import { ReceivablesSection } from "./ReceivablesSection";
 
 type OverviewV2Response = {
   actionQueue: ActionQueueItem[];
   kpis: {
     outstandingAmount: number;
+    balanceDueAmount: number;
     collectedMtd: number;
+    collectedAllTime: number;
+    partialPaymentsAmount: number;
     overdueAmount: number;
     avgDaysToPay: number;
     atRiskCount: number;
@@ -100,6 +104,8 @@ export function OverviewV2Section() {
       </div>
 
       <CashHealthStrip kpis={data?.kpis || null} isLoading={isLoading} />
+
+      <ReceivablesSection compact />
 
       <InvoicePipelineBoard counts={data?.pipelineCounts || null} isLoading={isLoading} />
 

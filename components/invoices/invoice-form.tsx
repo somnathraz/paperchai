@@ -42,6 +42,14 @@ export type InvoiceFormState = {
   date?: string; // Issue Date
   dueDate?: string;
   paymentTermOption?: "Immediate" | "Net 7" | "Net 15" | "Net 30" | "Custom";
+  paymentMethod?: string;
+  paymentInstructions?: string;
+  paymentLinkUrl?: string;
+  allowPartialPayments?: boolean;
+  amountPaid?: number;
+  paidAt?: string;
+  paymentReference?: string;
+  paymentNote?: string;
   currency?: string;
   logoSettings?: { width?: number; height?: number; style?: "rounded" | "square" | "circle" };
   signatureSettings?: { width?: number; height?: number; style?: "rounded" | "square" | "circle" };

@@ -25,6 +25,7 @@ import { ActionView } from "@/features/dashboard/components/stages/ActionView";
 import { CelebrationView } from "@/features/dashboard/components/stages/CelebrationView";
 import { InsightsView } from "@/features/dashboard/components/stages/InsightsView";
 import { OverviewV2Section } from "@/features/dashboard/components/OverviewV2Section";
+import { ReceivablesSection } from "@/features/dashboard/components/ReceivablesSection";
 
 type Props = {
   searchParams: Promise<{ tab?: string }>;
@@ -109,6 +110,12 @@ export default async function DashboardPage({ searchParams }: Props) {
               <AutomationLifecycle />
               <RecurringPlansSection compact />
               <RemindersTimeline />
+            </div>
+          )}
+
+          {activeTab === "receivables" && (
+            <div className="space-y-6">
+              <ReceivablesSection />
             </div>
           )}
 

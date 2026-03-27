@@ -203,6 +203,7 @@ export function ProjectDetailWidget({ projectId }: ProjectDetailWidgetProps) {
           <MilestoneList
             milestones={project.milestones || []}
             projectId={project.id}
+            clientId={project.clientId}
             currency={project.currency}
             readOnly={false}
           />

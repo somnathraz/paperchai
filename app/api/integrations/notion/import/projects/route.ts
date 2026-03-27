@@ -13,8 +13,14 @@ import { decrypt } from "@/lib/encryption";
 import { queryDatabase, extractPageProperties } from "@/lib/notion-client";
 import { requirePremium, checkDailyImportLimit } from "@/lib/middleware/premium-check";
 import { checkRateLimit } from "@/lib/rate-limiter";
-import { getUserTier } from "@/lib/tier-limits";
 import { resolveIntegrationWorkspace, requireIntegrationManager } from "@/lib/integrations/access";
+import { getWorkspaceEntitlement } from "@/lib/entitlements";
+import {
+  clearIntegrationConnectionError,
+  getReconnectMessage,
+  isProviderAuthError,
+  markIntegrationConnectionError,
+} from "@/lib/integrations/connection-health";
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,23 +32,23 @@ export async function POST(request: NextRequest) {
     const premiumError = await requirePremium(request);
     if (premiumError) return premiumError;
 
-    const tier = getUserTier(session.user.id, session.user.email);
-    const rateLimit = checkRateLimit(request, session.user.id, tier, "integrations");
-    if (!rateLimit.allowed) {
-      return NextResponse.json({ error: rateLimit.error }, { status: 429 });
-    }
-
     const workspace = await resolveIntegrationWorkspace(session.user.id, session.user.name);
     if (!workspace) {
       return NextResponse.json({ error: "No active workspace" }, { status: 400 });
     }
     const workspaceId = workspace.id;
+    const entitlement = await getWorkspaceEntitlement(workspaceId, session.user.id);
+    const planCode = entitlement.platformBypass ? "PREMIER" : entitlement.planCode;
+    const rateLimit = checkRateLimit(request, session.user.id, planCode, "integrations");
+    if (!rateLimit.allowed) {
+      return NextResponse.json({ error: rateLimit.error }, { status: 429 });
+    }
     const canManage = await requireIntegrationManager(session.user.id, workspaceId);
     if (!canManage) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const importLimit = await checkDailyImportLimit(workspaceId, tier);
+    const importLimit = await checkDailyImportLimit(workspaceId, planCode);
     if (!importLimit.allowed) {
       return NextResponse.json({ error: importLimit.error }, { status: 429 });
     }
@@ -75,12 +81,30 @@ export async function POST(request: NextRequest) {
     }
 
     const accessToken = decrypt(connection.accessToken);
+    const handleNotionError = async (code?: string) => {
+      if (isProviderAuthError("NOTION", code)) {
+        await markIntegrationConnectionError({
+          connectionId: connection.id,
+          provider: "NOTION",
+          reason: getReconnectMessage("NOTION"),
+        });
+        return NextResponse.json(
+          { error: getReconnectMessage("NOTION"), reconnectRequired: true },
+          { status: 403 }
+        );
+      }
+      return NextResponse.json({ error: "Failed to query Notion database" }, { status: 500 });
+    };
 
     // Preview Mode
     if (preview) {
       const response = await queryDatabase(accessToken, databaseId, undefined, 5);
       if (response.error) {
-        return NextResponse.json({ error: "Failed to query Notion database" }, { status: 500 });
+        return handleNotionError(response.error);
+      }
+
+      if (connection.lastError) {
+        await clearIntegrationConnectionError(connection.id);
       }
 
       const previewResults = [];
@@ -116,11 +140,15 @@ export async function POST(request: NextRequest) {
     do {
       const response = await queryDatabase(accessToken, databaseId, cursor);
       if (response.error) {
-        return NextResponse.json({ error: "Failed to query Notion database" }, { status: 500 });
+        return handleNotionError(response.error);
       }
       allPages = allPages.concat(response.results || []);
       cursor = response.has_more ? response.next_cursor : undefined;
     } while (cursor && allPages.length < 200);
+
+    if (connection.lastError) {
+      await clearIntegrationConnectionError(connection.id);
+    }
 
     if (allPages.length === 0) {
       return NextResponse.json({

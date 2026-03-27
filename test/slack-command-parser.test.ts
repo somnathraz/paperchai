@@ -55,25 +55,29 @@ function testSendWithKeyValue() {
 // --- Create: full and minimal ---
 function testCreateFull() {
   const r = parseSlackInvoiceCommand(
-    'create client:"Acme Corp" amount:1200 currency:USD due:2026-03-15 email:billing@acme.com item:"Consulting" qty:2 rate:600 notes:Q1 work'
+    'create client:"Acme Corp" project:"Website Revamp" amount:1200 currency:USD due:2026-03-15 email:billing@acme.com phone:+919999999999 item:"Consulting" qty:2 rate:600 notes:Q1 work'
   );
   assertIntent(r, "create");
   const c = r as {
     clientName?: string;
+    projectName?: string;
     amount?: number;
     currency?: string;
     dueDate?: string;
     email?: string;
+    phone?: string;
     itemTitle?: string;
     quantity?: number;
     rate?: number;
     notes?: string;
   };
   assert.equal(c.clientName, "Acme Corp");
+  assert.equal(c.projectName, "Website Revamp");
   assert.equal(c.amount, 1200);
   assert.equal(c.currency, "USD");
   assert.equal(c.dueDate, "2026-03-15");
   assert.equal(c.email, "billing@acme.com");
+  assert.equal(c.phone, "+919999999999");
   assert.equal(c.itemTitle, "Consulting");
   assert.equal(c.quantity, 2);
   assert.equal(c.rate, 600);
@@ -81,10 +85,11 @@ function testCreateFull() {
 }
 
 function testCreateMinimal() {
-  const r = parseSlackInvoiceCommand('create client:"Acme" amount:500');
+  const r = parseSlackInvoiceCommand('create client:"Acme" project:"Support" amount:500');
   assertIntent(r, "create");
-  const c = r as { clientName?: string; amount?: number };
+  const c = r as { clientName?: string; projectName?: string; amount?: number };
   assert.equal(c.clientName, "Acme");
+  assert.equal(c.projectName, "Support");
   assert.equal(c.amount, 500);
 }
 
@@ -127,6 +132,25 @@ function testCreateUnknownSubcommandFallsBackToHelp() {
   assertIntent(parseSlackInvoiceCommand("foo bar"), "help");
 }
 
+function testSetupFull() {
+  const r = parseSlackInvoiceCommand(
+    'setup client:"Acme Corp" project:"Website Revamp" email:billing@acme.com phone:+919999999999 notes:"Priority client"'
+  );
+  assertIntent(r, "setup");
+  const s = r as {
+    clientName?: string;
+    projectName?: string;
+    email?: string;
+    phone?: string;
+    notes?: string;
+  };
+  assert.equal(s.clientName, "Acme Corp");
+  assert.equal(s.projectName, "Website Revamp");
+  assert.equal(s.email, "billing@acme.com");
+  assert.equal(s.phone, "+919999999999");
+  assert.ok(s.notes?.includes("Priority"));
+}
+
 function run() {
   testHelpEmpty();
   testHelpExplicit();
@@ -143,6 +167,7 @@ function run() {
   testCreateInferAmountFromSentence();
   testCreateQuantityAndRate();
   testCreateUnknownSubcommandFallsBackToHelp();
+  testSetupFull();
   process.stdout.write("slack-command-parser: ok\n");
 }
 

@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { analyzeInvoice, InvoiceReviewData } from "@/lib/ai-review";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,17 @@ export async function POST(request: NextRequest) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+    if (!workspace) {
+      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+    }
+    const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+    if (!membership) {
+      return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+    }
+    if (!canWriteWorkspace(membership.role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const body = await request.json();
@@ -37,7 +49,7 @@ export async function POST(request: NextRequest) {
       taxSettings: body.taxSettings,
       total: body.total,
       subtotal: body.subtotal,
-      workspaceId: session.user.workspaceId,
+      workspaceId: workspace.id,
     };
 
     // Run AI analysis

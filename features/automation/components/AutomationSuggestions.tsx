@@ -18,12 +18,9 @@ export function AutomationSuggestions() {
   const [suggestions, setSuggestions] = useState<AutomationSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchSuggestions();
-  }, []);
-
-  const fetchSuggestions = async () => {
+  const fetchSuggestions = async (silent = false) => {
     try {
+      if (!silent) setLoading(true);
       const res = await fetch("/api/automation/suggestions");
       if (res.ok) {
         const data = await res.json();
@@ -32,9 +29,23 @@ export function AutomationSuggestions() {
     } catch (err) {
       console.error("Failed to fetch automation suggestions:", err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  // Initial fetch
+  useEffect(() => {
+    fetchSuggestions();
+  }, []);
+
+  // Refetch when user returns to this tab so acting on a suggestion (e.g. in another tab) makes it go away
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") fetchSuggestions(true);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   if (loading) {
     return (

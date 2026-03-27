@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { computeNextRunAt } from "@/lib/invoices/recurring-plans";
 import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
+import { assertLimit } from "@/lib/usage";
 
 const createPlanSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -37,7 +39,20 @@ export async function GET() {
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+      return NextResponse.json({
+        plans: [],
+        workspaceReady: false,
+        error: "No workspace found",
+      });
+    }
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "recurringPlans");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
     }
     const plans = await prisma.recurringInvoicePlan.findMany({
       where: {
@@ -57,6 +72,7 @@ export async function GET() {
     });
 
     return NextResponse.json({
+      workspaceReady: true,
       plans: plans.map((plan) => ({
         id: plan.id,
         name: plan.name,
@@ -101,7 +117,20 @@ export async function POST(request: NextRequest) {
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "No workspace found", code: "WORKSPACE_NOT_READY" },
+        { status: 409 }
+      );
+    }
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "recurringPlans");
+      await assertLimit(workspace.id, session.user.id, "recurringPlans");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
     }
     const canManage = await isWorkspaceApprover(workspace.id, session.user.id);
     if (!canManage) {

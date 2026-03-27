@@ -5,6 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/encryption";
 import { queryDatabase, extractPageProperties } from "@/lib/notion-client";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import {
+  clearIntegrationConnectionError,
+  getReconnectMessage,
+  isProviderAuthError,
+  markIntegrationConnectionError,
+} from "@/lib/integrations/connection-health";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
 
 function normalizeNotionId(id: string) {
   const compact = (id || "").replace(/-/g, "");
@@ -31,6 +38,14 @@ export async function GET(
       return NextResponse.json({ error: "No active workspace", pages: [] }, { status: 400 });
     }
 
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "integrations");
+    } catch (error) {
+      return NextResponse.json(serializeEntitlementError(error), {
+        status: (error as any)?.statusCode || 403,
+      });
+    }
+
     // 3. Get Notion connection
     const connection = await prisma.integrationConnection.findUnique({
       where: {
@@ -54,6 +69,21 @@ export async function GET(
 
     if (response.error) {
       console.error("[Notion Database Pages] API Error:", response.error);
+      if (isProviderAuthError("NOTION", response.error)) {
+        await markIntegrationConnectionError({
+          connectionId: connection.id,
+          provider: "NOTION",
+          reason: getReconnectMessage("NOTION"),
+        });
+        return NextResponse.json(
+          {
+            error: getReconnectMessage("NOTION"),
+            notionError: response.error,
+            reconnectRequired: true,
+          },
+          { status: 403 }
+        );
+      }
       const isPermissionIssue =
         response.error === "object_not_found" || response.error === "restricted_resource";
       return NextResponse.json(
@@ -65,6 +95,10 @@ export async function GET(
         },
         { status: isPermissionIssue ? 403 : 500 }
       );
+    }
+
+    if (connection.lastError) {
+      await clearIntegrationConnectionError(connection.id);
     }
 
     // 6. Transform response

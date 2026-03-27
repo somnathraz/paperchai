@@ -3,11 +3,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { sendInvoiceEmail } from "@/lib/invoices/send-invoice";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 import { prisma } from "@/lib/prisma";
-import { assertFeature } from "@/lib/entitlements";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
 import { z } from "zod";
 import { canSendInvoiceStatus, isValidInvoiceDateOrder } from "@/lib/invoices/workflow-validation";
 
@@ -39,6 +39,13 @@ export async function POST(req: NextRequest) {
 
   const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
   if (!workspace) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   // Rate limiting - 20 emails per hour per workspace
   const rateCheck = await checkRateLimitByProfile(req, "emailSend", workspace.id);
@@ -72,9 +79,13 @@ export async function POST(req: NextRequest) {
   // Feature Gate: Reminders
   if (automationEnabled) {
     try {
-      await assertFeature(workspace.id, session.user.id, "reminders");
-    } catch (error: any) {
-      return NextResponse.json({ error: error.message }, { status: 403 });
+      await assertWorkspaceFeature(workspace.id, session.user.id, "reminders");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      return NextResponse.json({ error: "Feature unavailable" }, { status: 403 });
     }
   }
 

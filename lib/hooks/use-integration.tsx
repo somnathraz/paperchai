@@ -9,13 +9,18 @@ export type IntegrationStatus = {
   workspaceName?: string;
   lastError?: string;
   lastSync?: string;
+  reconnectRequired?: boolean;
 };
 
 export type StatusResponse = {
   success: boolean;
   canManageIntegrations?: boolean;
   tier: string;
+  planCode?: string;
   integrationsEnabled: boolean;
+  features?: Record<string, boolean>;
+  workspaceRole?: string | null;
+  platformBypass?: boolean;
   limits: {
     maxConnections: number;
     importsPerDay: number;
