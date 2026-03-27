@@ -24,21 +24,20 @@ export default async function InvoicesPage() {
     select: { slug: true, name: true, isPro: true, accent: true, tags: true, category: true },
   });
 
-  const draftInvoices = await prisma.invoice.findMany({
+  const allInvoices = await prisma.invoice.findMany({
     where: {
       workspaceId: workspace.id,
-      status: "draft",
     },
     include: {
       client: { select: { name: true } },
     },
     orderBy: { updatedAt: "desc" },
-    take: 20,
+    take: 50,
   });
 
   const automationRuleIds = Array.from(
     new Set(
-      draftInvoices
+      allInvoices
         .map((invoice) => {
           const sendMeta = (invoice.sendMeta as Record<string, any>) || {};
           return sendMeta?.automation?.ruleId as string | undefined;
@@ -56,7 +55,7 @@ export default async function InvoicesPage() {
 
   const automationNameById = new Map(automationRules.map((rule) => [rule.id, rule.name]));
 
-  const draftSummaries = draftInvoices.map((invoice) => {
+  const invoiceSummaries = allInvoices.map((invoice) => {
     const sendMeta = (invoice.sendMeta as Record<string, any>) || {};
     const automation = sendMeta.automation || {};
     const ruleId = automation.ruleId as string | undefined;
@@ -72,7 +71,16 @@ export default async function InvoicesPage() {
       number: invoice.number,
       clientName: invoice.client?.name || "Unknown",
       amount,
+      totalRaw: Number(total || 0),
+      amountPaidRaw: Number(invoice.amountPaid || 0),
+      balanceDueRaw: Math.max(0, Number(total || 0) - Number(invoice.amountPaid || 0)),
+      createdAt: invoice.createdAt.toISOString(),
       updatedAt: invoice.updatedAt.toISOString(),
+      status: invoice.status,
+      paymentMethod: invoice.paymentMethod || null,
+      paymentReference: invoice.paymentReference || null,
+      paidAt: invoice.paidAt?.toISOString() || null,
+      source: invoice.source || null,
       automationName: ruleId ? automationNameById.get(ruleId) || "Automation" : null,
       approvalStatus: automation.approvalStatus || null,
     };
@@ -80,7 +88,7 @@ export default async function InvoicesPage() {
 
   return (
     <DashboardLayout userName={session.user?.name} userEmail={session.user?.email}>
-      <InvoicesHome firstName={firstName} templates={templates} drafts={draftSummaries} />
+      <InvoicesHome firstName={firstName} templates={templates} invoices={invoiceSummaries} />
     </DashboardLayout>
   );
 }

@@ -46,7 +46,7 @@ export default function Page() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema) }}
       />
 
-      <main className="relative min-h-screen overflow-hidden">
+      <main className="relative overflow-hidden">
         <Header />
 
         {/* Background gradient orbs */}
@@ -56,7 +56,7 @@ export default function Page() {
           <div className="absolute bottom-[-12%] left-[20%] h-96 w-96 rounded-full bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.18),transparent_52%)] blur-[120px]" />
         </div>
 
-        <div className="relative shell flex flex-col gap-16 pb-20 pt-4 sm:gap-20 sm:pb-24 sm:pt-6">
+        <div className="relative shell flex flex-col gap-16 pb-8 pt-4 sm:gap-20 sm:pb-10 sm:pt-6">
           <Hero />
 
           <div className="h-px bg-gradient-to-r from-transparent via-border/30 to-transparent" />

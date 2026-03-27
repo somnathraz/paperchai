@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { sendInvoiceEmail } from "@/lib/invoices/send-invoice";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
+import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
+import { getClientInfo, logAuditEvent } from "@/lib/security/audit-log";
+import { notifySlackApprovalResult } from "@/lib/integrations/slack/notifications";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -16,6 +19,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+    }
+    const canApprove = await isWorkspaceApprover(workspace.id, session.user.id);
+    if (!canApprove) {
+      return NextResponse.json(
+        { error: "Only workspace owners/admins can approve" },
+        { status: 403 }
+      );
     }
 
     const { id } = await params;
@@ -30,6 +40,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const sendMeta = (invoice.sendMeta as Record<string, any>) || {};
     const automation = sendMeta.automation || {};
+    const slackContext = automation?.slack as
+      | {
+          responseUrl?: string;
+          channelId?: string;
+          threadTs?: string;
+        }
+      | undefined;
     if (automation.approvalStatus !== "PENDING") {
       return NextResponse.json({ error: "Invoice does not require approval" }, { status: 400 });
     }
@@ -49,6 +66,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       approvalStatus: "APPROVED",
       approvedAt: now.toISOString(),
       approvedBy: session.user.id,
+      rejectionReason: null,
       scheduledSendAt: validScheduled ? validScheduled.toISOString() : automation.scheduledSendAt,
     };
 
@@ -63,6 +81,41 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             automation: nextAutomation,
           },
         },
+      });
+      await logAuditEvent({
+        userId: session.user.id,
+        action: "INVOICE_UPDATED",
+        workspaceId: workspace.id,
+        resourceType: "INVOICE",
+        resourceId: updated.id,
+        metadata: {
+          operation: "AUTOMATION_APPROVAL_APPROVE",
+          result: "SCHEDULED",
+          scheduledSendAt: updated.scheduledSendAt?.toISOString(),
+        },
+        ...getClientInfo(req),
+      });
+      await prisma.approvalRequest.updateMany({
+        where: {
+          workspaceId: workspace.id,
+          invoiceId: updated.id,
+          status: "PENDING",
+        },
+        data: {
+          status: "APPROVED",
+          approverUserId: session.user.id,
+          decisionNote: "Approved and scheduled for later send",
+          decidedAt: now,
+        },
+      });
+      await notifySlackApprovalResult({
+        workspaceId: workspace.id,
+        invoiceId: updated.id,
+        status: "APPROVED",
+        text: `Invoice ${invoice.number} approved and scheduled for send.`,
+        responseUrl: slackContext?.responseUrl,
+        channelId: slackContext?.channelId,
+        threadTs: slackContext?.threadTs,
       });
 
       return NextResponse.json({
@@ -91,6 +144,44 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       workspaceId: workspace.id,
       channel: "email",
       sendMeta: { automation: nextAutomation },
+      approvedBy: session.user.id,
+    });
+    await logAuditEvent({
+      userId: session.user.id,
+      action: "INVOICE_SENT",
+      workspaceId: workspace.id,
+      resourceType: "INVOICE",
+      resourceId: result.invoice.id,
+      metadata: {
+        operation: "AUTOMATION_APPROVAL_APPROVE",
+        result: "SENT",
+        delayed,
+      },
+      ...getClientInfo(req),
+    });
+    await prisma.approvalRequest.updateMany({
+      where: {
+        workspaceId: workspace.id,
+        invoiceId: result.invoice.id,
+        status: "PENDING",
+      },
+      data: {
+        status: "APPROVED",
+        approverUserId: session.user.id,
+        decisionNote: delayed ? "Approved late and sent immediately" : "Approved and sent",
+        decidedAt: now,
+      },
+    });
+    await notifySlackApprovalResult({
+      workspaceId: workspace.id,
+      invoiceId: result.invoice.id,
+      status: "APPROVED",
+      text: delayed
+        ? `Invoice ${invoice.number} approved and sent (approval happened after scheduled time).`
+        : `Invoice ${invoice.number} approved and sent successfully.`,
+      responseUrl: slackContext?.responseUrl,
+      channelId: slackContext?.channelId,
+      threadTs: slackContext?.threadTs,
     });
 
     return NextResponse.json({

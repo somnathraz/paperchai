@@ -18,8 +18,15 @@ import {
 } from "@/lib/notion-client";
 import { requirePremium, checkDailyImportLimit } from "@/lib/middleware/premium-check";
 import { checkRateLimit } from "@/lib/rate-limiter";
-import { getUserTier } from "@/lib/tier-limits";
 import { notionImportSchema, sanitizeJson } from "@/lib/validation/integration-schemas";
+import { resolveIntegrationWorkspace, requireIntegrationManager } from "@/lib/integrations/access";
+import { getWorkspaceEntitlement } from "@/lib/entitlements";
+import {
+  clearIntegrationConnectionError,
+  getReconnectMessage,
+  isProviderAuthError,
+  markIntegrationConnectionError,
+} from "@/lib/integrations/connection-health";
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,17 +41,22 @@ export async function POST(request: NextRequest) {
     if (premiumError) return premiumError;
 
     // 3. Rate Limiting
-    const tier = getUserTier(session.user.id, session.user.email);
-    const rateLimit = checkRateLimit(request, session.user.id, tier, "integrations");
+    // 4. Resolve workspace from DB
+    const workspace = await resolveIntegrationWorkspace(session.user.id, session.user.name);
+    if (!workspace) {
+      return NextResponse.json({ error: "No active workspace" }, { status: 400 });
+    }
+    const workspaceId = workspace.id;
+    const entitlement = await getWorkspaceEntitlement(workspaceId, session.user.id);
+    const planCode = entitlement.platformBypass ? "PREMIER" : entitlement.planCode;
+    const rateLimit = checkRateLimit(request, session.user.id, planCode, "integrations");
 
     if (!rateLimit.allowed) {
       return NextResponse.json({ error: rateLimit.error }, { status: 429 });
     }
-
-    // 4. Get workspace ID
-    const workspaceId = (session.user as any).activeWorkspaceId;
-    if (!workspaceId) {
-      return NextResponse.json({ error: "No active workspace" }, { status: 400 });
+    const canManage = await requireIntegrationManager(session.user.id, workspaceId);
+    if (!canManage) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // daily import limit removed for analysis preview
@@ -84,7 +96,22 @@ export async function POST(request: NextRequest) {
 
     if (dbResponse.error) {
       console.error("[Notion Import] Query error:", dbResponse.error);
+      if (isProviderAuthError("NOTION", dbResponse.error)) {
+        await markIntegrationConnectionError({
+          connectionId: connection.id,
+          provider: "NOTION",
+          reason: getReconnectMessage("NOTION"),
+        });
+        return NextResponse.json(
+          { error: getReconnectMessage("NOTION"), reconnectRequired: true },
+          { status: 403 }
+        );
+      }
       return NextResponse.json({ error: "Failed to query Notion database" }, { status: 500 });
+    }
+
+    if (connection.lastError) {
+      await clearIntegrationConnectionError(connection.id);
     }
 
     let pages = dbResponse.results || [];
@@ -241,26 +268,23 @@ ${createBorderedBox(
 
         // Call the SAME extraction endpoint as PDF wizard
         // This correctly extracts Client + Project + Milestones
-        const aiResponse = await fetch(
-          `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/ai/projects/extract`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              // Forward auth cookie for session
-              Cookie: request.headers.get("cookie") || "",
+        const aiResponse = await fetch(new URL("/api/ai/projects/extract", request.url), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // Forward auth cookie for session
+            Cookie: request.headers.get("cookie") || "",
+          },
+          body: JSON.stringify({
+            fileMeta: {
+              fileKey: `notion/${pageId}`,
+              fileName: `${pageTitle}.txt`,
+              mimeType: "text/plain",
+              size: combinedText.length,
             },
-            body: JSON.stringify({
-              fileMeta: {
-                fileKey: `notion/${pageId}`,
-                fileName: `${pageTitle}.txt`,
-                mimeType: "text/plain",
-                size: combinedText.length,
-              },
-              debugText: combinedText, // Pass text directly (no file upload needed)
-            }),
-          }
-        );
+            debugText: combinedText, // Pass text directly (no file upload needed)
+          }),
+        });
 
         const aiResult = await aiResponse.json();
 

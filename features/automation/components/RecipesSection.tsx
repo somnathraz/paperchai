@@ -1,10 +1,9 @@
 "use client";
 
 import { memo } from "react";
-import { Sparkles, ArrowRight, Database, MessageSquare } from "lucide-react";
+import { Sparkles, Database, MessageSquare } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAutomation } from "../hooks/useAutomation";
 
 interface Recipe {
@@ -69,36 +68,38 @@ const RECIPES: Recipe[] = [
 
 interface RecipeCardProps {
   recipe: Recipe;
+  canManage?: boolean;
   onAddCustomize?: (recipeId: string) => void;
   onPreview?: (recipeId: string) => void;
 }
 
 const RecipeCard = memo(function RecipeCard({
   recipe,
+  canManage = true,
   onAddCustomize,
   onPreview,
 }: RecipeCardProps) {
   const Icon = recipe.icon;
 
   return (
-    <Card className="p-4 sm:p-5 min-w-[280px] sm:min-w-[320px] flex-shrink-0 hover:border-violet-300 dark:hover:border-violet-700 transition-colors">
-      <div className="flex items-start gap-3 mb-3">
+    <Card className="p-4 sm:p-5 min-w-0 hover:border-violet-300 dark:hover:border-violet-700 transition-colors flex flex-col">
+      <div className="flex items-start gap-3 mb-3 min-w-0">
         <div
-          className={`p-2 rounded-lg ${recipe.source === "notion" ? "bg-black" : "bg-[#4A154B]"}`}
+          className={`shrink-0 p-2 rounded-lg ${recipe.source === "notion" ? "bg-black" : "bg-[#4A154B]"}`}
         >
           <Icon className="w-4 h-4 text-white" />
         </div>
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-sm mb-1">{recipe.title}</h3>
-          <p className="text-xs text-muted-foreground">Trigger: {recipe.trigger}</p>
+          <p className="text-xs text-muted-foreground break-words">Trigger: {recipe.trigger}</p>
         </div>
       </div>
 
-      <ul className="space-y-1.5 mb-4">
+      <ul className="space-y-1.5 mb-4 min-w-0 flex-1">
         {recipe.actions.map((action, index) => (
           <li key={index} className="text-xs text-muted-foreground flex items-start gap-2">
-            <span className="text-violet-600 dark:text-violet-400 mt-0.5">•</span>
-            <span className="flex-1">{action}</span>
+            <span className="text-violet-600 dark:text-violet-400 mt-0.5 shrink-0">•</span>
+            <span className="min-w-0 break-words">{action}</span>
           </li>
         ))}
       </ul>
@@ -106,12 +107,16 @@ const RecipeCard = memo(function RecipeCard({
       <div className="flex flex-col sm:flex-row gap-2">
         <Button
           onClick={() => onAddCustomize?.(recipe.id)}
+          disabled={!canManage}
+          title={!canManage ? "Only workspace owners/admins can manage automations" : undefined}
           className="w-full sm:flex-1 bg-violet-600 hover:bg-violet-700 text-sm min-h-[44px]"
         >
           Add & Customize
         </Button>
         <Button
           onClick={() => onPreview?.(recipe.id)}
+          disabled={!canManage}
+          title={!canManage ? "Only workspace owners/admins can manage automations" : undefined}
           variant="outline"
           className="w-full sm:flex-1 text-sm min-h-[44px]"
         >
@@ -124,7 +129,7 @@ const RecipeCard = memo(function RecipeCard({
 
 const EmptyState = memo(function EmptyState() {
   return (
-    <Card className="p-8 text-center">
+    <Card className="p-8 text-center min-w-0">
       <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
         <Sparkles className="w-8 h-8 text-muted-foreground opacity-30" />
       </div>
@@ -137,9 +142,11 @@ const EmptyState = memo(function EmptyState() {
 });
 
 export const RecipesSection = memo(function RecipesSection({
+  canManage = true,
   onAddCustomize,
   onPreview,
 }: {
+  canManage?: boolean;
   onAddCustomize?: (recipeId: string) => void;
   onPreview?: (recipeId: string) => void;
 }) {
@@ -161,8 +168,8 @@ export const RecipesSection = memo(function RecipesSection({
   }
 
   return (
-    <div className="space-y-4">
-      <div>
+    <div className="space-y-4 min-w-0">
+      <div className="min-w-0">
         <h2 className="text-xl font-semibold mb-1">Recommended Recipes</h2>
         <p className="text-sm text-muted-foreground">
           Quick-start automations from your {notionConnected && "Notion"}
@@ -174,35 +181,17 @@ export const RecipesSection = memo(function RecipesSection({
       {availableRecipes.length === 0 ? (
         <EmptyState />
       ) : (
-        <>
-          {/* Mobile: Horizontal scroll */}
-          <div className="lg:hidden">
-            <ScrollArea className="w-full">
-              <div className="flex gap-3 pb-4">
-                {availableRecipes.map((recipe) => (
-                  <RecipeCard
-                    key={recipe.id}
-                    recipe={recipe}
-                    onAddCustomize={onAddCustomize}
-                    onPreview={onPreview}
-                  />
-                ))}
-              </div>
-            </ScrollArea>
-          </div>
-
-          {/* Desktop: Grid */}
-          <div className="hidden lg:grid lg:grid-cols-2 gap-4">
-            {availableRecipes.map((recipe) => (
-              <RecipeCard
-                key={recipe.id}
-                recipe={recipe}
-                onAddCustomize={onAddCustomize}
-                onPreview={onPreview}
-              />
-            ))}
-          </div>
-        </>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0">
+          {availableRecipes.map((recipe) => (
+            <RecipeCard
+              key={recipe.id}
+              recipe={recipe}
+              canManage={canManage}
+              onAddCustomize={onAddCustomize}
+              onPreview={onPreview}
+            />
+          ))}
+        </div>
       )}
     </div>
   );

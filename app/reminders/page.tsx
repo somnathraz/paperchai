@@ -26,6 +26,11 @@ export default async function RemindersPage() {
             <p className="text-muted-foreground">
               Live view of your reminder queue, health, and upcoming schedule.
             </p>
+            <div className="pt-2 text-xs text-muted-foreground flex flex-wrap gap-4">
+              <span>1. Auto-chase unpaid invoices</span>
+              <span>2. Resolve failed sends quickly</span>
+              <span>3. Track reminder reliability</span>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <CreateReminderDialog />

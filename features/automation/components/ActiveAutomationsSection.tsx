@@ -45,6 +45,7 @@ export interface AutomationRule {
 
 interface ActiveAutomationsSectionProps {
   automations?: AutomationRule[];
+  canManage?: boolean;
   onCreateNew?: () => void;
   onEdit?: (id: string) => void;
   onPause?: (id: string) => void;
@@ -204,7 +205,13 @@ const AutomationCard = memo(function AutomationCard({
   );
 });
 
-const EmptyState = memo(function EmptyState({ onCreateNew }: { onCreateNew?: () => void }) {
+const EmptyState = memo(function EmptyState({
+  canManage,
+  onCreateNew,
+}: {
+  canManage?: boolean;
+  onCreateNew?: () => void;
+}) {
   return (
     <div className="text-center py-12">
       <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
@@ -214,7 +221,12 @@ const EmptyState = memo(function EmptyState({ onCreateNew }: { onCreateNew?: () 
       <p className="text-sm text-muted-foreground mb-4">
         Create your first automation to start chasing invoices automatically.
       </p>
-      <Button onClick={onCreateNew} className="bg-violet-600 hover:bg-violet-700">
+      <Button
+        onClick={onCreateNew}
+        disabled={!canManage}
+        title={!canManage ? "Only workspace owners/admins can create automations" : undefined}
+        className="bg-violet-600 hover:bg-violet-700"
+      >
         <Plus className="w-4 h-4 mr-2" />
         Create your first automation
       </Button>
@@ -224,6 +236,7 @@ const EmptyState = memo(function EmptyState({ onCreateNew }: { onCreateNew?: () 
 
 export const ActiveAutomationsSection = memo(function ActiveAutomationsSection({
   automations = [],
+  canManage = true,
   onCreateNew,
   onEdit,
   onPause,
@@ -249,7 +262,7 @@ export const ActiveAutomationsSection = memo(function ActiveAutomationsSection({
           : "Resume";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -260,6 +273,8 @@ export const ActiveAutomationsSection = memo(function ActiveAutomationsSection({
         </div>
         <Button
           onClick={onCreateNew}
+          disabled={!canManage}
+          title={!canManage ? "Only workspace owners/admins can create automations" : undefined}
           className="bg-violet-600 hover:bg-violet-700 w-full sm:w-auto"
         >
           <Plus className="w-4 h-4 mr-2" />
@@ -299,7 +314,7 @@ export const ActiveAutomationsSection = memo(function ActiveAutomationsSection({
       {/* Content */}
       {filteredAutomations.length === 0 ? (
         <Card className="p-6">
-          <EmptyState onCreateNew={onCreateNew} />
+          <EmptyState canManage={canManage} onCreateNew={onCreateNew} />
         </Card>
       ) : (
         <>

@@ -47,11 +47,15 @@ export default async function NewInvoicePage({ searchParams }: PageProps) {
       const automation = sendMeta.automation || {};
       const automationApproval = automation.approvalStatus
         ? {
-            status: automation.approvalStatus as "PENDING" | "APPROVED",
+            status: automation.approvalStatus as "PENDING" | "APPROVED" | "REJECTED",
             requestedAt: automation.approvalRequestedAt,
             approvedAt: automation.approvedAt,
+            rejectedAt: automation.rejectedAt,
+            rejectionReason: automation.rejectionReason,
             scheduledSendAt: automation.scheduledSendAt,
             ruleId: automation.ruleId,
+            escalationCount: automation.escalationCount,
+            lastEscalatedAt: automation.lastEscalatedAt,
           }
         : undefined;
       initialFormState = {
@@ -69,6 +73,15 @@ export default async function NewInvoicePage({ searchParams }: PageProps) {
         extraSummaryValue: undefined,
         notes: invoice.notes || "",
         terms: invoice.terms || "",
+        paymentMethod: invoice.paymentMethod || "",
+        paymentInstructions: invoice.paymentInstructions || "",
+        paymentLinkUrl: invoice.paymentLinkUrl || "",
+        allowPartialPayments: invoice.allowPartialPayments || false,
+        amountPaid:
+          typeof invoice.amountPaid === "object" ? Number(invoice.amountPaid) : invoice.amountPaid,
+        paidAt: invoice.paidAt ? invoice.paidAt.toISOString() : "",
+        paymentReference: invoice.paymentReference || "",
+        paymentNote: invoice.paymentNote || "",
         reminderTone: invoice.reminderTone || "Warm + Polite",
         items: invoice.items.map((item) => ({
           title: item.title,

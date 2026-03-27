@@ -79,14 +79,14 @@ export async function requireWorkspaceAccess(
   }
 
   // Get workspace with membership
-  const workspace = await prisma.workspace.findUnique({
-    where: { id: targetWorkspaceId },
+  const workspace = await prisma.workspace.findFirst({
+    where: { id: targetWorkspaceId, deletedAt: null },
     select: {
       id: true,
       name: true,
       ownerId: true,
       members: {
-        where: { userId },
+        where: { userId, removedAt: null },
         select: { id: true, role: true },
       },
     },
@@ -200,6 +200,7 @@ export async function isOnlyOwner(workspaceId: string, userId: string): Promise<
     where: {
       workspaceId,
       role: "OWNER",
+      removedAt: null,
     },
   });
 
@@ -208,6 +209,7 @@ export async function isOnlyOwner(workspaceId: string, userId: string): Promise<
       workspaceId,
       userId,
       role: "OWNER",
+      removedAt: null,
     },
   });
 

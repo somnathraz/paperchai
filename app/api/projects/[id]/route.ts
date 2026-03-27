@@ -4,9 +4,11 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { Prisma } from "@prisma/client";
+import { generateWorkspaceInvoiceNumber } from "@/lib/invoices/numbering";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -20,9 +22,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { id } = await params;
 
   try {
-    const project = await prisma.project.findUnique({
+    const project = await prisma.project.findFirst({
       where: {
-        id: id,
+        id,
         workspaceId: workspace.id,
       },
       include: {
@@ -61,6 +63,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const { id } = await params;
 
@@ -82,6 +91,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   } = body;
 
   try {
+    const existingProject = await prisma.project.findFirst({
+      where: { id, workspaceId: workspace.id },
+      select: { id: true, clientId: true },
+    });
+    if (!existingProject) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    if (clientId) {
+      const client = await prisma.client.findFirst({
+        where: { id: clientId, workspaceId: workspace.id },
+        select: { id: true },
+      });
+      if (!client) {
+        return NextResponse.json({ error: "Client not found" }, { status: 404 });
+      }
+    }
+
     // Step 1: If milestones are being updated, handle draft invoices
     let deletedDraftInvoices = 0;
     if (body.milestones && Array.isArray(body.milestones)) {
@@ -107,10 +134,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     // Step 2: Update the project
     const project = await prisma.project.update({
-      where: {
-        id: id,
-        workspaceId: workspace.id,
-      },
+      where: { id: existingProject.id },
       data: {
         name,
         description,
@@ -161,29 +185,45 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       );
 
       for (const milestone of eligibleMilestones) {
-        await prisma.invoice.create({
-          data: {
-            workspaceId: workspace.id,
-            clientId: project.clientId,
-            projectId: project.id,
-            number: `INV-${Date.now().toString(36).toUpperCase()}`,
-            status: "draft",
-            total: milestone.amount,
-            subtotal: milestone.amount,
-            currency: milestone.currency || "INR",
-            dueDate: milestone.dueDate || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days
-            notes: `Auto-generated for milestone: ${milestone.title}`,
-            items: {
-              create: {
-                title: milestone.title,
-                quantity: 1,
-                unitPrice: milestone.amount,
+        let created = false;
+        for (let attempt = 0; attempt < 3 && !created; attempt++) {
+          const number = await generateWorkspaceInvoiceNumber(workspace.id);
+          try {
+            await prisma.invoice.create({
+              data: {
+                workspaceId: workspace.id,
+                clientId: project.clientId,
+                projectId: project.id,
+                number,
+                status: "draft",
                 total: milestone.amount,
+                subtotal: milestone.amount,
+                currency: milestone.currency || "INR",
+                dueDate: milestone.dueDate || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days
+                notes: `Auto-generated for milestone: ${milestone.title}`,
+                items: {
+                  create: {
+                    title: milestone.title,
+                    quantity: 1,
+                    unitPrice: milestone.amount,
+                    total: milestone.amount,
+                  },
+                },
               },
-            },
-          },
-        });
-        createdDraftInvoices++;
+            });
+            created = true;
+            createdDraftInvoices++;
+          } catch (error) {
+            if (
+              error instanceof Prisma.PrismaClientKnownRequestError &&
+              error.code === "P2002" &&
+              attempt < 2
+            ) {
+              continue;
+            }
+            throw error;
+          }
+        }
       }
     }
 
@@ -200,7 +240,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 }
 
-export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -210,14 +250,21 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const { id } = await params;
 
   try {
     // Step 1: Check for existing invoices
-    const projectWithInvoices = await prisma.project.findUnique({
+    const projectWithInvoices = await prisma.project.findFirst({
       where: {
-        id: id,
+        id,
         workspaceId: workspace.id,
       },
       include: {
@@ -267,10 +314,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 
     // Step 5: Delete the project
     await prisma.project.delete({
-      where: {
-        id: id,
-        workspaceId: workspace.id,
-      },
+      where: { id: projectWithInvoices.id },
     });
 
     return NextResponse.json({

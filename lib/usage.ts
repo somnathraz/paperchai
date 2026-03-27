@@ -1,8 +1,79 @@
-import { prisma } from "@/lib/prisma";
-import { isInternalUser } from "./entitlements";
 import { startOfMonth } from "date-fns";
+import { prisma } from "@/lib/prisma";
+import { EntitlementError, getWorkspaceEntitlement } from "./entitlements";
 
-export type MetricKey = "invoices_per_month" | "clients" | "members";
+export type MetricKey =
+  | "invoicesPerMonth"
+  | "clients"
+  | "projects"
+  | "members"
+  | "automationRules"
+  | "recurringPlans";
+
+function metricToCounterName(metric: MetricKey) {
+  switch (metric) {
+    case "invoicesPerMonth":
+      return "invoices_per_month";
+    case "clients":
+      return "clients";
+    case "projects":
+      return "projects";
+    case "members":
+      return "members";
+    case "automationRules":
+      return "automation_rules";
+    case "recurringPlans":
+      return "recurring_plans";
+  }
+}
+
+async function getCurrentUsage(workspaceId: string, metric: MetricKey) {
+  if (metric === "invoicesPerMonth") {
+    const periodStart = startOfMonth(new Date());
+    const counter = await prisma.usageCounter.findUnique({
+      where: {
+        workspaceId_metric_periodStart: {
+          workspaceId,
+          metric: metricToCounterName(metric),
+          periodStart,
+        },
+      },
+    });
+    return counter?.count || 0;
+  }
+
+  if (metric === "clients") {
+    return prisma.client.count({ where: { workspaceId } });
+  }
+
+  if (metric === "projects") {
+    return prisma.project.count({ where: { workspaceId } });
+  }
+
+  if (metric === "members") {
+    return prisma.workspaceMember.count({ where: { workspaceId, removedAt: null } });
+  }
+
+  if (metric === "automationRules") {
+    return prisma.automationRule.count({
+      where: {
+        workspaceId,
+        status: { not: "ARCHIVED" },
+      },
+    });
+  }
+
+  return prisma.recurringInvoicePlan.count({
+    where: {
+      workspaceId,
+      status: { not: "ARCHIVED" },
+    },
+  });
+}
+
+function limitErrorCode(metric: MetricKey) {
+  return metric === "members" ? "SEAT_LIMIT_REACHED" : "PLAN_LIMIT_REACHED";
+}
 
 export async function assertLimit(
   workspaceId: string,
@@ -10,79 +81,53 @@ export async function assertLimit(
   metric: MetricKey,
   amountToAdd = 1
 ) {
-  // 1. Internal Bypass
-  if (await isInternalUser(userId)) return;
+  const entitlement = await getWorkspaceEntitlement(workspaceId, userId);
 
-  // 2. Load Subscription Snapshot
-  const subscription = await prisma.subscription.findUnique({
-    where: { workspaceId },
-    select: { limitsSnapshot: true },
-  });
+  if (entitlement.platformBypass) return entitlement;
 
-  if (!subscription) throw new Error("No subscription found");
-
-  const limits = subscription.limitsSnapshot as Record<string, number>;
-  const limit = limits[metric];
-
-  // unlimited
-  if (limit === -1 || limit === undefined) return;
-
-  // 3. Check Usage
-  let currentUsage = 0;
-
-  if (metric === "invoices_per_month") {
-    const periodStart = startOfMonth(new Date());
-    const counter = await prisma.usageCounter.findUnique({
-      where: {
-        workspaceId_metric_periodStart: {
-          workspaceId,
-          metric,
-          periodStart,
-        },
-      },
-    });
-    currentUsage = counter?.count || 0;
-  } else if (metric === "clients") {
-    // For absolute counts (clients, members), we query the table directly usually,
-    // OR maintain UsageCounter.
-    // User Schema includes UsageCounter for "clients"?
-    // "metric": "clients".
-    // Let's assume UsageCounter is the source of truth for caching,
-    // or we count DB if critical.
-    // User prompted: "Read UsageCounter for current month".
-    // For "clients" (total), periodStart might be ignored or fixed epoch?
-    // Or we count actual clients.
-    // Strict limit usually implies DB count.
-    // I'll count DB for accuracy for static resources like Clients/Members.
-    currentUsage = await prisma.client.count({ where: { workspaceId } });
-  } else if (metric === "members") {
-    currentUsage = await prisma.workspaceMember.count({ where: { workspaceId } });
+  if (!entitlement.subscriptionActive) {
+    throw new EntitlementError(
+      "SUBSCRIPTION_INACTIVE",
+      "Subscription is not active. Update billing to continue.",
+      403,
+      { planCode: entitlement.planCode, subscriptionStatus: entitlement.subscriptionStatus }
+    );
   }
 
+  const limit = entitlement.limits[metric];
+  if (limit === -1 || limit === undefined) return entitlement;
+
+  const currentUsage = await getCurrentUsage(workspaceId, metric);
   if (currentUsage + amountToAdd > limit) {
-    throw new Error(`Limit reached for ${metric}. (${currentUsage}/${limit})`);
+    throw new EntitlementError(
+      limitErrorCode(metric),
+      `Limit reached for ${metric}. (${currentUsage}/${limit})`,
+      409,
+      { planCode: entitlement.planCode, metric, limit, currentUsage }
+    );
   }
+
+  return entitlement;
 }
 
 export async function incrementUsage(workspaceId: string, metric: MetricKey, amount = 1) {
-  if (metric === "invoices_per_month") {
-    const periodStart = startOfMonth(new Date());
-    await prisma.usageCounter.upsert({
-      where: {
-        workspaceId_metric_periodStart: {
-          workspaceId,
-          metric,
-          periodStart,
-        },
-      },
-      update: { count: { increment: amount } },
-      create: {
+  if (metric !== "invoicesPerMonth") return;
+
+  const periodStart = startOfMonth(new Date());
+  await prisma.usageCounter.upsert({
+    where: {
+      workspaceId_metric_periodStart: {
         workspaceId,
-        metric,
+        metric: metricToCounterName(metric),
         periodStart,
-        count: amount,
       },
-    });
-  }
-  // For clients/members, we don't necessarily increment a counter if we count(*) on assert.
+    },
+    update: { count: { increment: amount } },
+    create: {
+      workspaceId,
+      metric: metricToCounterName(metric),
+      periodStart,
+      count: amount,
+    },
+  });
 }

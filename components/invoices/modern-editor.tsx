@@ -5,10 +5,12 @@ import dynamic from "next/dynamic";
 import { TemplateSidebar } from "./modern-editor/template-sidebar";
 import { CanvasPreview } from "./modern-editor/canvas-preview";
 import { EditorHeader } from "./modern-editor/editor-header";
+import { SummaryCards } from "./summary-cards";
 import { CreateClientModal, CreateProjectModal } from "./modern-editor/panels";
 import { InvoiceFormState } from "./invoice-form";
 import { InvoiceSection } from "./modern-editor/types";
 import type { AIReviewResult, ReviewIssue, ReviewSuggestion } from "@/lib/ai-review";
+import { invoiceService } from "@/lib/api/services";
 import {
   PropertiesPanelSkeleton,
   SendModalSkeleton,
@@ -144,13 +146,16 @@ export function ModernEditor({
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [projectToEdit, setProjectToEdit] = useState<any>(null);
   const [sendModalOpen, setSendModalOpen] = useState(false);
+  const [razorpayConfigured, setRazorpayConfigured] = useState(false);
+  const [razorpayLinkLoading, setRazorpayLinkLoading] = useState(false);
 
   useEffect(() => {
     const load = async () => {
-      const [cRes, pRes, settingsRes] = await Promise.all([
+      const [cRes, pRes, settingsRes, workspaceSettingsRes] = await Promise.all([
         fetch("/api/clients/list"),
         fetch("/api/projects/list"),
         fetch("/api/user/settings"),
+        fetch("/api/workspace/settings"),
       ]);
       if (cRes.ok) {
         const data = await cRes.json();
@@ -161,27 +166,33 @@ export function ModernEditor({
         setProjects(data.projects || []);
       }
       // Apply user settings as defaults (only if no initial form state)
-      if (settingsRes.ok && !initialFormState) {
-        const { settings } = await settingsRes.json();
-        if (settings) {
-          setFormState((prev) => ({
-            ...prev,
-            currency: settings.defaultCurrency || prev.currency,
-            notes: settings.defaultNotes || prev.notes,
-            terms: settings.defaultTerms || prev.terms,
-            taxSettings: {
-              inclusive: settings.taxInclusive ?? false,
-              automatic: false,
-              defaultRate: settings.defaultTaxRate ?? 18,
-            },
-            // Apply default tax rate to first item if no tax rate set
-            items: prev.items.map((item) => ({
-              ...item,
-              taxRate: item.taxRate || settings.defaultTaxRate || 0,
-            })),
-          }));
-        }
+      if (!initialFormState) {
+        const [{ settings }, workspaceSettings] = await Promise.all([
+          settingsRes.ok ? settingsRes.json() : Promise.resolve({ settings: null }),
+          workspaceSettingsRes && (workspaceSettingsRes as any).ok
+            ? (workspaceSettingsRes as any).json()
+            : Promise.resolve(null),
+        ]);
+        setFormState((prev) => ({
+          ...prev,
+          currency: settings?.defaultCurrency || prev.currency,
+          notes: settings?.defaultNotes || prev.notes,
+          terms: settings?.defaultTerms || prev.terms,
+          taxSettings: {
+            inclusive: settings?.taxInclusive ?? false,
+            automatic: false,
+            defaultRate: settings?.defaultTaxRate ?? 18,
+          },
+          items: prev.items.map((item) => ({
+            ...item,
+            taxRate: item.taxRate || settings?.defaultTaxRate || 0,
+          })),
+          paymentMethod: workspaceSettings?.defaultPaymentMethod || prev.paymentMethod,
+          paymentInstructions: workspaceSettings?.paymentInstructions || prev.paymentInstructions,
+          paymentLinkUrl: workspaceSettings?.paymentLinkBaseUrl || prev.paymentLinkUrl,
+        }));
       }
+      setRazorpayConfigured(Boolean(process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID));
     };
     load();
   }, [initialFormState]);
@@ -208,6 +219,67 @@ export function ModernEditor({
     setToast({ type, message });
     setTimeout(() => setToast(null), 3000);
   }, []);
+
+  const refreshPersistedInvoiceState = useCallback(async () => {
+    if (!savedInvoiceId) return;
+    try {
+      const res = await fetch(`/api/invoices/${savedInvoiceId}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      const invoice = data?.invoice;
+      if (!invoice) return;
+
+      setInvoiceStatus(invoice.status || undefined);
+      setLastSentAt(invoice.lastSentAt || undefined);
+      setFormState((prev) => ({
+        ...prev,
+        paymentMethod: invoice.paymentMethod || "",
+        paymentInstructions: invoice.paymentInstructions || "",
+        paymentLinkUrl: invoice.paymentLinkUrl || "",
+        allowPartialPayments: Boolean(invoice.allowPartialPayments),
+        amountPaid:
+          typeof invoice.amountPaid === "string"
+            ? Number(invoice.amountPaid)
+            : Number(invoice.amountPaid || 0),
+        paidAt: invoice.paidAt || "",
+        paymentReference: invoice.paymentReference || "",
+        paymentNote: invoice.paymentNote || "",
+      }));
+    } catch {
+      // Silent refresh; editor should not spam errors during background sync.
+    }
+  }, [savedInvoiceId]);
+
+  const selectedClient = useMemo(
+    () => (formState.clientId ? clients.find((c) => c.id === formState.clientId) : undefined),
+    [clients, formState.clientId]
+  );
+
+  const selectedProject = useMemo(
+    () => (formState.projectId ? projects.find((p) => p.id === formState.projectId) : undefined),
+    [projects, formState.projectId]
+  );
+
+  const sendScheduleBlocker = useMemo(() => {
+    if (!formState.clientId) return "Select a client before sending or scheduling.";
+    if (!formState.dueDate) return "Set a due date before sending or scheduling.";
+
+    const dueDate = new Date(formState.dueDate);
+    if (Number.isNaN(dueDate.getTime())) return "Set a valid due date before continuing.";
+
+    if (formState.date) {
+      const issueDate = new Date(formState.date);
+      if (!Number.isNaN(issueDate.getTime()) && dueDate.getTime() < issueDate.getTime()) {
+        return "Due date cannot be earlier than issue date.";
+      }
+    }
+
+    if (invoiceStatus === "paid" || invoiceStatus === "cancelled") {
+      return `Invoice is ${invoiceStatus} and cannot be sent or scheduled.`;
+    }
+
+    return null;
+  }, [formState.clientId, formState.dueDate, formState.date, invoiceStatus]);
 
   // Helper to populate invoice items from a project
   const populateItemsFromProject = useCallback(
@@ -367,10 +439,54 @@ export function ModernEditor({
     }
   }, [formState, currentTemplate, sections, showToast]);
 
+  const handleGenerateRazorpayLink = useCallback(async () => {
+    if (!savedInvoiceId) {
+      showToast("error", "Save the invoice before generating a Razorpay link.");
+      return;
+    }
+
+    setRazorpayLinkLoading(true);
+    try {
+      const result = await invoiceService.generateRazorpayPaymentLink(savedInvoiceId);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      const payload = (result.data || {}) as { paymentLinkUrl?: string; reused?: boolean };
+
+      const paymentLinkUrl = payload.paymentLinkUrl;
+      if (paymentLinkUrl) {
+        setFormState((prev) => ({
+          ...prev,
+          paymentMethod: "Razorpay",
+          paymentLinkUrl,
+        }));
+      }
+
+      showToast(
+        "success",
+        payload.reused ? "Razorpay payment link reused" : "Razorpay payment link generated"
+      );
+      await refreshPersistedInvoiceState();
+    } catch (error: any) {
+      showToast("error", error.message || "Failed to generate Razorpay link");
+    } finally {
+      setRazorpayLinkLoading(false);
+    }
+  }, [refreshPersistedInvoiceState, savedInvoiceId, showToast]);
+
   const handleSchedule = useCallback(
     async (payload: any) => {
-      if (!formState.clientId) {
-        showToast("error", "Select a client before scheduling.");
+      if (sendScheduleBlocker) {
+        showToast("error", sendScheduleBlocker);
+        return;
+      }
+      if (invoiceStatus === "sent") {
+        showToast("error", "Invoice already sent. Duplicate scheduling is blocked.");
+        return;
+      }
+      if ((payload.channel === "email" || payload.channel === "both") && !selectedClient?.email) {
+        showToast("error", "Client email is required for email scheduling.");
         return;
       }
       // Auto-generate invoice number if not provided
@@ -450,19 +566,37 @@ export function ModernEditor({
       });
 
       if (scheduleRes.ok) {
+        setInvoiceStatus("scheduled");
         showToast("success", "Invoice scheduled successfully");
       } else {
-        const error = await scheduleRes.json();
+        const error = await scheduleRes.json().catch(() => ({}));
         showToast("error", error.error || "Failed to schedule invoice.");
       }
     },
-    [formState, currentTemplate, sections, savedInvoiceId, showToast]
+    [
+      formState,
+      currentTemplate,
+      sections,
+      savedInvoiceId,
+      sendScheduleBlocker,
+      invoiceStatus,
+      selectedClient?.email,
+      showToast,
+    ]
   );
 
   const handleSend = useCallback(
     async (payload: any) => {
-      if (!formState.clientId) {
-        showToast("error", "Select a client before sending.");
+      if (sendScheduleBlocker) {
+        showToast("error", sendScheduleBlocker);
+        return;
+      }
+      if (invoiceStatus === "sent") {
+        showToast("error", "Invoice already sent.");
+        return;
+      }
+      if ((payload.channel === "email" || payload.channel === "both") && !selectedClient?.email) {
+        showToast("error", "Client email is required for email delivery.");
         return;
       }
       let invoiceId = savedInvoiceId;
@@ -470,7 +604,14 @@ export function ModernEditor({
         const res = await fetch("/api/invoices/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formState),
+          body: JSON.stringify({
+            ...formState,
+            number: formState.number || `DRAFT-${Date.now()}`,
+            templateSlug: currentTemplate,
+            sections,
+            reminderCadence: formState.reminderCadence,
+            attachments: formState.attachments,
+          }),
         });
         if (res.ok) {
           const data = await res.json();
@@ -484,7 +625,14 @@ export function ModernEditor({
       const sendRes = await fetch("/api/invoices/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoiceId, channel: payload.channel }),
+        body: JSON.stringify({
+          invoiceId,
+          channel: payload.channel,
+          idempotencyKey:
+            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        }),
       });
 
       if (sendRes.ok) {
@@ -495,19 +643,33 @@ export function ModernEditor({
         }
         showToast("success", "Invoice sent");
       } else {
-        showToast("error", "Failed to send invoice");
+        const error = await sendRes.json().catch(() => ({}));
+        showToast("error", error.error || "Failed to send invoice");
       }
     },
-    [formState, savedInvoiceId, showToast]
+    [
+      formState,
+      savedInvoiceId,
+      sendScheduleBlocker,
+      invoiceStatus,
+      selectedClient?.email,
+      currentTemplate,
+      sections,
+      showToast,
+    ]
   );
 
   const handleOpenSendModal = useCallback(() => {
-    if (!formState.clientId) {
-      showToast("error", "Please select a client before sending.");
+    if (sendScheduleBlocker) {
+      showToast("error", sendScheduleBlocker);
+      return;
+    }
+    if (invoiceStatus === "sent") {
+      showToast("error", "Invoice already sent.");
       return;
     }
     setSendModalOpen(true);
-  }, [formState.clientId, showToast]);
+  }, [sendScheduleBlocker, invoiceStatus, showToast]);
 
   const handleFormStateChange = useCallback(
     (newState: InvoiceFormState) => {
@@ -530,8 +692,20 @@ export function ModernEditor({
 
   const handleSendInvoiceFromModal = useCallback(
     async (options: any) => {
-      if (!formState.clientId) {
-        showToast("error", "Select a client before sending.");
+      if (sendScheduleBlocker) {
+        showToast("error", sendScheduleBlocker);
+        return;
+      }
+      if (invoiceStatus === "sent") {
+        showToast("error", "Invoice already sent.");
+        return;
+      }
+      if (
+        (options.channel === "email" || options.channel === "both") &&
+        !selectedClient?.email &&
+        !options.recipientEmail
+      ) {
+        showToast("error", "Recipient email is required for email delivery.");
         return;
       }
       let invoiceId = savedInvoiceId;
@@ -539,7 +713,14 @@ export function ModernEditor({
         const res = await fetch("/api/invoices/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formState),
+          body: JSON.stringify({
+            ...formState,
+            number: formState.number || `DRAFT-${Date.now()}`,
+            templateSlug: currentTemplate,
+            sections,
+            reminderCadence: formState.reminderCadence,
+            attachments: formState.attachments,
+          }),
         });
         if (res.ok) {
           const data = await res.json();
@@ -558,6 +739,8 @@ export function ModernEditor({
         body: JSON.stringify({
           invoiceId,
           channel: options.channel,
+          recipientEmail: options.recipientEmail,
+          idempotencyKey: options.idempotencyKey,
           automationEnabled: options.automationEnabled,
           reminderSettings: options.reminderSettings,
         }),
@@ -571,10 +754,20 @@ export function ModernEditor({
         }
         showToast("success", "Invoice sent successfully!");
       } else {
-        showToast("error", "Failed to send invoice.");
+        const error = await sendRes.json().catch(() => ({}));
+        showToast("error", error.error || "Failed to send invoice.");
       }
     },
-    [formState, savedInvoiceId, showToast]
+    [
+      formState,
+      savedInvoiceId,
+      sendScheduleBlocker,
+      invoiceStatus,
+      selectedClient?.email,
+      currentTemplate,
+      sections,
+      showToast,
+    ]
   );
 
   const handleApproveAutomation = useCallback(async () => {
@@ -600,7 +793,13 @@ export function ModernEditor({
       setFormState((prev) => ({
         ...prev,
         automationApproval: prev.automationApproval
-          ? { ...prev.automationApproval, status: "APPROVED", approvedAt: new Date().toISOString() }
+          ? {
+              ...prev.automationApproval,
+              status: "APPROVED",
+              approvedAt: new Date().toISOString(),
+              scheduledSendAt:
+                data?.invoice?.scheduledSendAt || prev.automationApproval.scheduledSendAt,
+            }
           : prev.automationApproval,
       }));
 
@@ -708,16 +907,76 @@ export function ModernEditor({
   }, [aiReviewResult, showToast]);
 
   const invoiceTotals = useMemo(() => {
-    const subtotal = formState.items.reduce(
-      (sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0),
-      0
-    );
-    const taxRate = formState.taxSettings?.defaultRate || 0;
-    const tax = subtotal * (taxRate / 100);
-    const total = subtotal + tax;
-    return { subtotal, tax, total };
-  }, [formState.items, formState.taxSettings?.defaultRate]);
+    const isInclusive = formState.taxSettings?.inclusive === true;
+    const subtotal = (formState.items || []).reduce((sum, item) => {
+      const lineTotal = (item.quantity || 1) * (item.unitPrice || 0);
+      const rate = item.taxRate || 0;
+      return isInclusive && rate > 0 ? sum + lineTotal / (1 + rate / 100) : sum + lineTotal;
+    }, 0);
+    const tax = (formState.items || []).reduce((sum, item) => {
+      const lineTotal = (item.quantity || 1) * (item.unitPrice || 0);
+      const rate = item.taxRate || 0;
+      if (isInclusive && rate > 0) {
+        return sum + (lineTotal - lineTotal / (1 + rate / 100));
+      }
+      return sum + (lineTotal * rate) / 100;
+    }, 0);
+    const discountTotal =
+      (formState.adjustments || [])
+        .filter((adj) => adj.type === "discount")
+        .reduce((sum, adj) => {
+          const base = adj.mode === "percent" ? (adj.value / 100) * subtotal : adj.value;
+          return sum + base;
+        }, 0) || 0;
+    const feeTotal =
+      (formState.adjustments || [])
+        .filter((adj) => adj.type === "fee")
+        .reduce((sum, adj) => {
+          const base = adj.mode === "percent" ? (adj.value / 100) * subtotal : adj.value;
+          return sum + base;
+        }, 0) || 0;
+    const total = subtotal + tax - discountTotal + feeTotal;
+    const amountPaid = Number(formState.amountPaid || 0);
+    const balanceDue = Math.max(0, total - amountPaid);
+    return { subtotal, tax, total, amountPaid, balanceDue };
+  }, [formState.items, formState.taxSettings, formState.adjustments, formState.amountPaid]);
+
+  const scheduleDisabledReason =
+    sendScheduleBlocker ||
+    (invoiceStatus === "sent"
+      ? "Invoice already sent. Create a new revision to schedule again."
+      : undefined);
+  const sendDisabledReason =
+    sendScheduleBlocker ||
+    (invoiceStatus === "sent"
+      ? "Invoice already sent. Create a new revision to send again."
+      : undefined);
+
+  const canSchedule = !scheduleDisabledReason;
+  const canSend = !sendDisabledReason;
   const approvalStatus = formState.automationApproval?.status;
+  const nextReminderAt = useMemo(() => {
+    const steps = formState.reminderSchedule?.steps || [];
+    const pending = steps
+      .filter((step) => step.status !== "SENT" && step.status !== "SKIPPED")
+      .map((step) => (step.sendAt ? new Date(step.sendAt) : null))
+      .filter((date): date is Date => !!date && !Number.isNaN(date.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime());
+    return pending[0]?.toISOString();
+  }, [formState.reminderSchedule?.steps]);
+
+  useEffect(() => {
+    if (!savedInvoiceId) return;
+
+    void refreshPersistedInvoiceState();
+
+    const onFocus = () => {
+      void refreshPersistedInvoiceState();
+    };
+
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [savedInvoiceId, refreshPersistedInvoiceState]);
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-white">
@@ -734,9 +993,59 @@ export function ModernEditor({
         onSchedule={handleSchedule}
         onSend={handleSend}
         onOpenSendModal={handleOpenSendModal}
+        canSchedule={canSchedule}
+        scheduleDisabledReason={scheduleDisabledReason}
+        canSend={canSend}
+        sendDisabledReason={sendDisabledReason}
         approvalStatus={approvalStatus}
         onApproveAutomation={approvalStatus === "PENDING" ? handleApproveAutomation : undefined}
       />
+
+      {savedInvoiceId ? (
+        <div className="border-b border-border/60 bg-slate-50/70 px-6 py-4">
+          <SummaryCards
+            cards={[
+              {
+                label: "Invoice Total",
+                value: new Intl.NumberFormat("en-IN", {
+                  style: "currency",
+                  currency: formState.currency || "INR",
+                  maximumFractionDigits: 0,
+                }).format(invoiceTotals.total),
+                sub: invoiceStatus ? `Status: ${invoiceStatus}` : "Draft",
+              },
+              {
+                label: "Amount Paid",
+                value: new Intl.NumberFormat("en-IN", {
+                  style: "currency",
+                  currency: formState.currency || "INR",
+                  maximumFractionDigits: 0,
+                }).format(invoiceTotals.amountPaid),
+                sub:
+                  formState.paymentReference && formState.paymentNote
+                    ? `${formState.paymentReference} · ${formState.paymentNote}`
+                    : formState.paymentReference ||
+                      formState.paymentNote ||
+                      "No recorded reference",
+              },
+              {
+                label: "Balance Due",
+                value: new Intl.NumberFormat("en-IN", {
+                  style: "currency",
+                  currency: formState.currency || "INR",
+                  maximumFractionDigits: 0,
+                }).format(invoiceTotals.balanceDue),
+                sub:
+                  invoiceTotals.balanceDue === 0 && invoiceTotals.amountPaid > 0
+                    ? `Fully paid${formState.paidAt ? ` · ${new Date(formState.paidAt).toLocaleDateString("en-IN")}` : ""}`
+                    : formState.allowPartialPayments
+                      ? "Partial payments enabled"
+                      : "Awaiting payment",
+              },
+            ]}
+          />
+        </div>
+      ) : null}
 
       {/* Main layout: Left Properties | Center Canvas | Right Templates Drawer */}
       <div className="flex flex-1 overflow-hidden">
@@ -759,6 +1068,10 @@ export function ModernEditor({
             setProjectToEdit(project);
             setCreateProjectOpen(true);
           }}
+          onGenerateRazorpayLink={handleGenerateRazorpayLink}
+          razorpayLinkLoading={razorpayLinkLoading}
+          razorpayConfigured={razorpayConfigured}
+          savedInvoiceId={savedInvoiceId}
         />
 
         {/* Center: Large Canvas Preview (Hero) */}
@@ -778,12 +1091,8 @@ export function ModernEditor({
             sidebarCollapsed={sidebarCollapsed}
             sidebarWidth={sidebarWidth}
             sections={sections}
-            selectedClient={
-              formState.clientId ? clients.find((c) => c.id === formState.clientId) : undefined
-            }
-            selectedProject={
-              formState.projectId ? projects.find((p) => p.id === formState.projectId) : undefined
-            }
+            selectedClient={selectedClient}
+            selectedProject={selectedProject}
           />
         </div>
 
@@ -880,12 +1189,25 @@ export function ModernEditor({
           })),
           currency: formState.currency || "INR",
         }}
-        client={clients.find((c) => c.id === formState.clientId)}
-        project={projects.find((p) => p.id === formState.projectId)}
+        client={selectedClient}
+        project={selectedProject}
         templateName={selectedTemplateName || "Classic Gray"}
         initialAutomationEnabled={
           !!(formState.remindersEnabled && formState.reminderSchedule?.steps?.length)
         }
+        automationState={{
+          invoiceStatus,
+          approvalStatus: formState.automationApproval?.status,
+          approvalRequestedAt: formState.automationApproval?.requestedAt,
+          approvedAt: formState.automationApproval?.approvedAt,
+          rejectedAt: formState.automationApproval?.rejectedAt,
+          scheduledSendAt: formState.automationApproval?.scheduledSendAt,
+          lastSentAt,
+          remindersEnabled: formState.remindersEnabled,
+          nextReminderAt,
+          escalationCount: formState.automationApproval?.escalationCount,
+          lastEscalatedAt: formState.automationApproval?.lastEscalatedAt,
+        }}
         onSend={handleSendInvoiceFromModal}
       />
 

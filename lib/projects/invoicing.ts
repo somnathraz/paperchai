@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { InvoiceStatus, MilestoneStatus } from "@prisma/client";
+import { getWorkspaceApprovers } from "@/lib/invoices/approval-routing";
 
 type AutomationInvoiceOptions = {
   automationRuleId?: string;
@@ -54,11 +55,13 @@ export async function generateInvoiceDraftFromMilestone(
   const description = `Milestone: ${milestone.title}` + (project.name ? ` - ${project.name}` : "");
   const scheduledSendAt = options?.scheduledSendAt || null;
   const approvalRequired = options?.approvalRequired === true;
+  const approvers = approvalRequired ? await getWorkspaceApprovers(project.workspaceId) : [];
   const approvalMeta = approvalRequired
     ? {
         ruleId: options?.automationRuleId,
         approvalStatus: "PENDING",
         approvalRequestedAt: new Date().toISOString(),
+        approvalRequestedTo: approvers.map((approver) => approver.userId),
         scheduledSendAt: scheduledSendAt ? scheduledSendAt.toISOString() : undefined,
       }
     : undefined;

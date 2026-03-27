@@ -24,11 +24,18 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Workspace or User not found" }, { status: 404 });
     }
 
-    // Check if user is workspace owner
-    // Note: workspace ownerId might be null in schema but logically exists. Or check legacyOwnerWorkspaces?
-    // Assuming ownerId is populated or backfilled.
-    // If not, check other source? Strict check for now.
-    if (workspace.ownerId !== session.user.id) {
+    // Check if user is workspace owner (supports both legacy ownerId and member role owner).
+    const ownerMembership = await prisma.workspaceMember.findFirst({
+      where: {
+        workspaceId: workspace.id,
+        userId: session.user.id,
+        removedAt: null,
+        role: "OWNER",
+      },
+      select: { id: true },
+    });
+
+    if (workspace.ownerId !== session.user.id && !ownerMembership) {
       return NextResponse.json(
         { error: "Only workspace owner can delete workspace" },
         { status: 403 }
@@ -54,7 +61,12 @@ export async function DELETE(req: Request) {
     if (user.activeWorkspaceId === workspace.id) {
       // Find another workspace for the user
       const otherMembership = await prisma.workspaceMember.findFirst({
-        where: { userId: user.id, workspaceId: { not: workspace.id } },
+        where: {
+          userId: user.id,
+          workspaceId: { not: workspace.id },
+          removedAt: null,
+          workspace: { deletedAt: null },
+        },
         include: { workspace: true },
       });
 

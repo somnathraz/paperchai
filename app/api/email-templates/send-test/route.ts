@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { sendEmail } from "@/lib/email";
 import { getThemeHtml } from "@/lib/email-themes";
 import { replaceTemplateVariables, TemplateVars } from "@/lib/reminders";
@@ -11,7 +10,7 @@ import { replaceTemplateVariables, TemplateVars } from "@/lib/reminders";
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -40,8 +39,18 @@ export async function POST(req: NextRequest) {
     if (!workspace) {
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
+    const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+    if (!membership) {
+      return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+    }
+    if (!canWriteWorkspace(membership.role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const toEmail = recipientEmail || session.user.email;
+    if (!toEmail) {
+      return NextResponse.json({ error: "Recipient email is required" }, { status: 422 });
+    }
     const workspaceName = workspace.name || "Your Company";
 
     // Mock data for preview

@@ -7,12 +7,14 @@ import { WorkspaceMembersPanel } from "@/components/settings/workspace-members-p
 
 export default async function MembersSettingsPage() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email || !session.user.workspaceId) {
+  const workspaceId =
+    (session?.user as any)?.activeWorkspaceId || (session?.user as any)?.workspaceId;
+  if (!session?.user?.email || !workspaceId) {
     redirect("/login?callbackUrl=/settings/members");
   }
 
   const workspace = await prisma.workspace.findUnique({
-    where: { id: session.user.workspaceId },
+    where: { id: workspaceId },
     include: {
       members: { include: { user: true }, orderBy: { joinedAt: "asc" } },
       invites: { orderBy: { createdAt: "desc" } },

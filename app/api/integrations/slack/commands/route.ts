@@ -1,633 +1,1260 @@
 /**
  * Slack Slash Commands Endpoint
  * POST /api/integrations/slack/commands
- * 
- * Handles /invoice commands from Slack
- * Commands: /invoice create <description>, /invoice from-thread, /invoice status <number>
+ *
+ * Approval-first flow:
+ * - /invoice create ... => draft + pending approval request
+ * - /invoice setup ... => create/update client and project only
+ * - /invoice send <number> => pending approval request only
+ * - /invoice status <number>
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { decrypt } from "@/lib/encryption";
-import { verifySlackSignature, fetchThreadMessages, sendEphemeralMessage } from "@/lib/slack-client";
-import { slackCommandSchema, sanitizeInput } from "@/lib/validation/integration-schemas";
+import { decrypt, hash } from "@/lib/encryption";
+import { verifySlackSignature, getUserInfo, testAuth } from "@/lib/slack-client";
+import { slackCommandSchema } from "@/lib/validation/integration-schemas";
+import { parseSlackInvoiceCommand } from "@/lib/integrations/slack/command-parser";
+import { generateWorkspaceInvoiceNumber } from "@/lib/invoices/numbering";
+import { getWorkspaceApprovers } from "@/lib/invoices/approval-routing";
+import {
+  getReconnectMessage,
+  isProviderAuthError,
+  markIntegrationConnectionError,
+} from "@/lib/integrations/connection-health";
+import { assertWorkspaceFeature } from "@/lib/entitlements";
+
+type SlackActor = {
+  internalUserId: string;
+  role: "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
+};
+
+type SlackConnectionCandidate = {
+  id: string;
+  workspaceId: string;
+  accessToken: string | null;
+  providerWorkspaceId: string | null;
+  providerWorkspaceName: string | null;
+};
+
+const SLACK_COMMAND_WINDOW_MS = 60 * 1000;
+const SLACK_COMMAND_LIMIT_PER_USER = 30;
+const slackCommandRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const SLACK_FALLBACK_MAX_CANDIDATES = 1;
+const SLACK_FALLBACK_BUDGET_MS = 1200;
 
 export async function POST(request: NextRequest) {
+  let event: { id: string } | null = null;
+  try {
+    const rawBody = await request.text();
+    const signature = request.headers.get("x-slack-signature");
+    const timestamp = request.headers.get("x-slack-request-timestamp");
+
+    if (!verifySlackSignature(signature, timestamp, rawBody)) {
+      return NextResponse.json(
+        {
+          response_type: "ephemeral",
+          text: "Invalid Slack signature.",
+        },
+        { status: 401 }
+      );
+    }
+
+    const formData = new URLSearchParams(rawBody);
+    const params: Record<string, string> = {};
+    formData.forEach((value, key) => {
+      params[key] = value;
+    });
+
+    const validated = slackCommandSchema.safeParse(params);
+    if (!validated.success) {
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Invalid command payload.",
+      });
+    }
+
+    const { team_id, channel_id, user_id, text, response_url } = validated.data;
+    const sanitizedText = sanitizeSlackCommandText(text);
+    const command = parseSlackInvoiceCommand(sanitizedText);
+    const externalEventId = hash(`slack:${timestamp || "no-ts"}:${rawBody}`);
+
+    const rateLimit = checkSlackCommandRateLimit(team_id, user_id);
+    if (!rateLimit.allowed) {
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Too many /invoice requests. Please wait a minute and try again.",
+      });
+    }
+
+    // Fast-fail invalid create date inputs before any network/database-heavy work.
+    if (command.intent === "create" && command.dueDate && !parseDueDate(command.dueDate)) {
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Invalid due date. Use YYYY-MM-DD (example: due:2026-02-15).",
+      });
+    }
+
+    let matchingConnections = await prisma.integrationConnection.findMany({
+      where: {
+        providerWorkspaceId: team_id,
+        provider: "SLACK",
+        status: "CONNECTED",
+      },
+      select: {
+        id: true,
+        workspaceId: true,
+        accessToken: true,
+        providerWorkspaceId: true,
+        providerWorkspaceName: true,
+      },
+    });
+
+    if (matchingConnections.length === 0) {
+      const fallback = await resolveConnectionBySlackAuth(team_id);
+      if (fallback) {
+        matchingConnections = [fallback];
+      }
+    }
+
+    if (matchingConnections.length !== 1 || !matchingConnections[0]?.accessToken) {
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text:
+          matchingConnections.length > 1
+            ? "Multiple PaperChai workspaces are mapped to this Slack team. Ask your admin to reconnect Slack from one workspace."
+            : "PaperChai is not connected to this Slack workspace. Reconnect Slack from Settings > Integrations.",
+      });
+    }
+    const connection = matchingConnections[0];
+    if (!connection?.accessToken) {
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "PaperChai is not connected to this Slack workspace.",
+      });
+    }
+
+    event = await createCommandEvent({
+      workspaceId: connection.workspaceId,
+      externalEventId,
+      teamId: team_id,
+      userId: user_id,
+      channelId: channel_id,
+      responseUrl: response_url,
+      rawText: sanitizedText,
+      commandIntent: command.intent,
+    });
+
+    if (!event) {
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "This command was already processed.",
+      });
+    }
+
+    if (command.intent === "help") {
+      await finalizeCommandEvent(event.id, "EXECUTED", command);
+      return helpResponse();
+    }
+
+    const accessToken = decrypt(connection.accessToken);
+    const authCheck = await testAuth(accessToken);
+    if (!authCheck.ok && isProviderAuthError("SLACK", authCheck.error)) {
+      await markIntegrationConnectionError({
+        connectionId: connection.id,
+        provider: "SLACK",
+        reason: getReconnectMessage("SLACK"),
+      });
+      await finalizeCommandEvent(event.id, "FAILED", command, "Slack connection expired/revoked");
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: getReconnectMessage("SLACK"),
+      });
+    }
+
+    const actor = await resolveSlackActor({
+      workspaceId: connection.workspaceId,
+      externalUserId: user_id,
+      accessToken,
+    });
+
+    if (!actor) {
+      await prisma.botCommandEvent.update({
+        where: { id: event.id },
+        data: {
+          status: "REJECTED",
+          errorMessage: "Unable to map Slack user to workspace member",
+          processedAt: new Date(),
+        },
+      });
+
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Your Slack account is not linked to a PaperChai workspace member. Ask an admin to sign in once with the same email.",
+      });
+    }
+
+    const isReadOnlyActor = actor.role === "VIEWER";
+
     try {
-        // 1. Get raw body for signature verification
-        const rawBody = await request.text();
-
-        // 2. Verify Slack signature (security layer)
-        const signature = request.headers.get("x-slack-signature");
-        const timestamp = request.headers.get("x-slack-request-timestamp");
-
-        if (!verifySlackSignature(signature, timestamp, rawBody)) {
-            console.error("[Slack Commands] Invalid signature");
-            return NextResponse.json(
-                { error: "Invalid signature" },
-                { status: 401 }
-            );
-        }
-
-        // 3. Parse URL-encoded body
-        const formData = new URLSearchParams(rawBody);
-        const params: Record<string, string> = {};
-        formData.forEach((value, key) => {
-            params[key] = value;
-        });
-
-        // 4. Validate input
-        const validated = slackCommandSchema.safeParse(params);
-        if (!validated.success) {
-            console.error("[Slack Commands] Invalid params:", validated.error);
-            return NextResponse.json({
-                response_type: "ephemeral",
-                text: "❌ Invalid command format. Please try again."
-            });
-        }
-
-        const { team_id, channel_id, user_id, command, text, response_url } = validated.data;
-
-        // 5. Find connection for this Slack workspace
-        const connection = await prisma.integrationConnection.findFirst({
-            where: {
-                providerWorkspaceId: team_id,
-                provider: "SLACK",
-                status: "CONNECTED",
-            },
-            include: {
-                workspace: true,
-            },
-        });
-
-        if (!connection || !connection.accessToken) {
-            return NextResponse.json({
-                response_type: "ephemeral",
-                text: "❌ PaperChai is not connected to this Slack workspace. Please connect at your PaperChai dashboard → Settings → Integrations."
-            });
-        }
-
-        // 6. Decrypt token
-        const accessToken = decrypt(connection.accessToken);
-
-        // 7. Parse command
-        const sanitizedText = sanitizeInput(text);
-        const parts = sanitizedText.split(/\s+/);
-        const subCommand = parts[0]?.toLowerCase() || "";
-        const args = parts.slice(1).join(" ");
-
-        // 8. Handle different sub-commands
-        switch (subCommand) {
-            case "create":
-                return handleCreateCommand(connection.workspaceId, args, channel_id, user_id, accessToken);
-
-            case "from-thread":
-                return handleFromThreadCommand(connection.workspaceId, channel_id, user_id, accessToken, params.thread_ts);
-
-            case "status":
-                return handleStatusCommand(connection.workspaceId, args);
-
-            case "send":
-                return handleSendCommand(connection.workspaceId, args);
-
-            case "mark-paid":
-                return handleMarkPaidCommand(connection.workspaceId, args);
-
-            case "help":
-            case "":
-                return handleHelpCommand();
-
-            default:
-                return NextResponse.json({
-                    response_type: "ephemeral",
-                    text: `❓ Unknown command: \`${subCommand}\`\n\nAvailable commands:\n• \`/invoice create <description>\` - Create invoice from description\n• \`/invoice status <number>\` - Check invoice status\n• \`/invoice send <number>\` - Send an invoice\n• \`/invoice mark-paid <number> <amount> <method> "<ref>"\` - Mark invoice as paid\n• \`/invoice help\` - Show this help`
-                });
-        }
-
+      await assertWorkspaceFeature(connection.workspaceId, actor.internalUserId, "integrations");
     } catch (error) {
-        console.error("[Slack Commands Error]", error);
-        return NextResponse.json({
-            response_type: "ephemeral",
-            text: "❌ An error occurred. Please try again later."
-        });
-    }
-}
-
-/**
- * Handle /invoice create <description>
- */
-async function handleCreateCommand(
-    workspaceId: string,
-    description: string,
-    channelId: string,
-    userId: string,
-    accessToken: string
-) {
-    if (!description || description.length < 5) {
-        return NextResponse.json({
-            response_type: "ephemeral",
-            text: "❌ Please provide a description.\n\nExample: `/invoice create for Acme Corp: 5 hours consulting at $100/hr`"
-        });
-    }
-
-    // Create import record
-    const connection = await prisma.integrationConnection.findFirst({
-        where: { workspaceId, provider: "SLACK" },
-    });
-
-    if (!connection) {
-        return NextResponse.json({
-            response_type: "ephemeral",
-            text: "❌ Slack not connected."
-        });
-    }
-
-    const slackImport = await prisma.slackImport.create({
-        data: {
-            connectionId: connection.id,
-            channelId,
-            importType: "SLASH_COMMAND",
-            status: "PENDING",
-            rawMessages: JSON.stringify([{ user: userId, text: description }]),
-        },
-    });
-
-    // Call AI extraction (async - respond immediately)
-    processAIExtraction(slackImport.id, description, workspaceId).catch(console.error);
-
-    return NextResponse.json({
+      await finalizeCommandEvent(
+        event.id,
+        "REJECTED",
+        command,
+        "Plan does not allow Slack commands"
+      );
+      return NextResponse.json({
         response_type: "ephemeral",
-        text: `✅ Creating invoice from your description...\n\n> ${description.substring(0, 100)}${description.length > 100 ? "..." : ""}\n\nYou'll receive a notification when it's ready. Check your PaperChai dashboard for the draft.`,
-        blocks: [
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: `✅ *Creating invoice...*\n\n> ${description.substring(0, 150)}${description.length > 150 ? "..." : ""}`
-                }
-            },
-            {
-                type: "context",
-                elements: [
-                    {
-                        type: "mrkdwn",
-                        text: "Processing with AI... You'll see the draft in PaperChai shortly."
-                    }
-                ]
-            },
-            {
-                type: "actions",
-                elements: [
-                    {
-                        type: "button",
-                        text: { type: "plain_text", text: "Open PaperChai" },
-                        url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/dashboard/invoices`,
-                        action_id: "open_dashboard"
-                    }
-                ]
-            }
-        ]
-    });
-}
-
-/**
- * Handle /invoice from-thread
- */
-async function handleFromThreadCommand(
-    workspaceId: string,
-    channelId: string,
-    userId: string,
-    accessToken: string,
-    threadTs?: string
-) {
-    if (!threadTs) {
-        return NextResponse.json({
-            response_type: "ephemeral",
-            text: "❌ This command must be used in a thread. Reply to a message thread and try again."
-        });
+        text: "Slack commands are not available on this workspace plan. Upgrade to Premium or Premier.",
+      });
     }
 
-    // Fetch thread messages
-    const messagesResponse = await fetchThreadMessages(accessToken, channelId, threadTs);
-
-    if (!messagesResponse.ok || !messagesResponse.messages || messagesResponse.messages.length === 0) {
+    if (command.intent === "status") {
+      if (!command.invoiceNumber) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, "Missing invoice number");
         return NextResponse.json({
-            response_type: "ephemeral",
-            text: `❌ Could not fetch thread messages: ${messagesResponse.error || "Unknown error"}`
+          response_type: "ephemeral",
+          text: "Usage: /invoice status INV-0001",
         });
-    }
+      }
 
-    const connection = await prisma.integrationConnection.findFirst({
-        where: { workspaceId, provider: "SLACK" },
-    });
-
-    if (!connection) {
-        return NextResponse.json({
-            response_type: "ephemeral",
-            text: "❌ Slack not connected."
-        });
-    }
-
-    // Create import record
-    const slackImport = await prisma.slackImport.create({
-        data: {
-            connectionId: connection.id,
-            channelId,
-            threadTs,
-            importType: "THREAD_SUMMARY",
-            status: "PENDING",
-            rawMessages: JSON.stringify(messagesResponse.messages),
-        },
-    });
-
-    // Combine messages for AI
-    const combinedText = messagesResponse.messages
-        .map((m) => m.text)
-        .join("\n---\n");
-
-    // Call AI extraction (async)
-    processAIExtraction(slackImport.id, combinedText, workspaceId).catch(console.error);
-
-    return NextResponse.json({
-        response_type: "ephemeral",
-        text: `✅ Analyzing ${messagesResponse.messages.length} messages from this thread...\n\nYou'll receive a notification when the invoice draft is ready.`,
-        blocks: [
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: `✅ *Analyzing thread...* (${messagesResponse.messages.length} messages)`
-                }
-            },
-            {
-                type: "context",
-                elements: [
-                    {
-                        type: "mrkdwn",
-                        text: "AI is extracting invoice details. Check PaperChai for the draft."
-                    }
-                ]
-            }
-        ]
-    });
-}
-
-/**
- * Handle /invoice status <number>
- */
-async function handleStatusCommand(workspaceId: string, invoiceNumber: string) {
-    if (!invoiceNumber) {
-        return NextResponse.json({
-            response_type: "ephemeral",
-            text: "❌ Please provide an invoice number.\n\nExample: `/invoice status INV-001`"
-        });
-    }
-
-    const invoice = await prisma.invoice.findFirst({
+      const invoice = await prisma.invoice.findFirst({
         where: {
-            workspaceId,
-            number: invoiceNumber.toUpperCase(),
+          workspaceId: connection.workspaceId,
+          number: command.invoiceNumber,
         },
         include: {
-            client: { select: { name: true } },
+          client: { select: { name: true } },
         },
-    });
+      });
 
-    if (!invoice) {
+      if (!invoice) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, "Invoice not found");
         return NextResponse.json({
-            response_type: "ephemeral",
-            text: `❌ Invoice \`${invoiceNumber}\` not found.`
+          response_type: "ephemeral",
+          text: `Invoice ${command.invoiceNumber} not found.`,
         });
+      }
+
+      await finalizeCommandEvent(event.id, "EXECUTED", command, undefined, invoice.id);
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: `Invoice ${invoice.number}: ${invoice.status.toUpperCase()} (${invoice.currency} ${Number(invoice.total).toLocaleString()})`,
+      });
     }
 
-    const statusEmoji: Record<string, string> = {
-        draft: "📝",
-        sent: "📤",
-        paid: "✅",
-        overdue: "⚠️",
-        cancelled: "❌",
-    };
-
-    return NextResponse.json({
-        response_type: "ephemeral",
-        blocks: [
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: `*Invoice ${invoice.number}*\n${statusEmoji[invoice.status] || "📄"} Status: *${invoice.status.toUpperCase()}*`
-                }
-            },
-            {
-                type: "section",
-                fields: [
-                    { type: "mrkdwn", text: `*Client:* ${invoice.client.name}` },
-                    { type: "mrkdwn", text: `*Total:* ${invoice.currency} ${Number(invoice.total).toLocaleString()}` },
-                    { type: "mrkdwn", text: `*Issue Date:* ${invoice.issueDate.toLocaleDateString()}` },
-                    { type: "mrkdwn", text: `*Due Date:* ${invoice.dueDate?.toLocaleDateString() || "Not set"}` },
-                ]
-            },
-            {
-                type: "actions",
-                elements: [
-                    {
-                        type: "button",
-                        text: { type: "plain_text", text: "View Invoice" },
-                        url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/dashboard/invoices/${invoice.id}`,
-                        action_id: "view_invoice"
-                    }
-                ]
-            }
-        ]
-    });
-}
-
-/**
- * Handle /invoice help
- */
-function handleHelpCommand() {
-    return NextResponse.json({
-        response_type: "ephemeral",
-        blocks: [
-            {
-                type: "header",
-                text: { type: "plain_text", text: "📄 PaperChai Invoice Commands" }
-            },
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: "*Available Commands:*"
-                }
-            },
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: "`/invoice create <description>`\nCreate an invoice from a text description.\n_Example: `/invoice create for Acme Corp: 5 hours consulting at $100/hr`_"
-                }
-            },
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: "`/invoice from-thread`\nAnalyze the current thread and create an invoice from the conversation.\n_Use this inside a thread reply._"
-                }
-            },
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: "`/invoice status <number>`\nCheck the status of an existing invoice.\n_Example: `/invoice status INV-001`_"
-                }
-            },
-            {
-                type: "divider"
-            },
-            {
-                type: "context",
-                elements: [
-                    {
-                        type: "mrkdwn",
-                        text: "Need help? Visit <https://paperchai.com/help|PaperChai Help Center>"
-                    }
-                ]
-            }
-        ]
-    });
-}
-
-/**
- * Process AI extraction (async)
- */
-async function processAIExtraction(importId: string, text: string, workspaceId: string) {
-    try {
-        // Update status
-        await prisma.slackImport.update({
-            where: { id: importId },
-            data: { status: "PROCESSING" },
-        });
-
-        // Call AI extraction API
-        const response = await fetch(
-            `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/ai/slack/extract`,
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text, workspaceId, importId }),
-            }
+    if (command.intent === "send") {
+      if (isReadOnlyActor) {
+        await finalizeCommandEvent(
+          event.id,
+          "REJECTED",
+          command,
+          "Viewer role cannot request sends"
         );
-
-        const result = await response.json();
-
-        if (result.success) {
-            await prisma.slackImport.update({
-                where: { id: importId },
-                data: {
-                    status: "COMPLETED",
-                    aiSummary: result.summary,
-                    extractedData: result.data,
-                    confidenceScore: result.confidence,
-                    invoiceId: result.invoiceId,
-                },
-            });
-        } else {
-            await prisma.slackImport.update({
-                where: { id: importId },
-                data: {
-                    status: "FAILED",
-                    errorMessage: result.error || "AI extraction failed",
-                },
-            });
-        }
-    } catch (error) {
-        console.error("[AI Extraction Error]", error);
-        await prisma.slackImport.update({
-            where: { id: importId },
-            data: {
-                status: "FAILED",
-                errorMessage: "Internal error during AI extraction",
-            },
-        });
-    }
-}
-
-/**
- * Handle /invoice send <number>
- */
-async function handleSendCommand(workspaceId: string, invoiceNumber: string) {
-    if (!invoiceNumber) {
         return NextResponse.json({
-            response_type: "ephemeral",
-            text: "❌ Please provide an invoice number.\n\nExample: `/invoice send INV-001`"
+          response_type: "ephemeral",
+          text: "Your workspace role is VIEWER. Ask an admin/member to run send commands.",
         });
-    }
+      }
+      if (!command.invoiceNumber) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, "Missing invoice number");
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: "Usage: /invoice send INV-0001",
+        });
+      }
 
-    const invoice = await prisma.invoice.findFirst({
+      const invoice = await prisma.invoice.findFirst({
         where: {
-            workspaceId,
-            number: invoiceNumber.toUpperCase(),
+          workspaceId: connection.workspaceId,
+          number: command.invoiceNumber,
         },
         include: {
-            client: { select: { name: true, email: true } },
+          client: { select: { name: true, email: true, phone: true, whatsapp: true } },
         },
-    });
+      });
 
-    if (!invoice) {
+      if (!invoice) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, "Invoice not found");
         return NextResponse.json({
-            response_type: "ephemeral",
-            text: `❌ Invoice \`${invoiceNumber}\` not found.`
+          response_type: "ephemeral",
+          text: `Invoice ${command.invoiceNumber} not found.`,
         });
-    }
+      }
 
-    if (invoice.status === "paid") {
+      if (invoice.status === "sent" || invoice.status === "paid") {
+        await finalizeCommandEvent(
+          event.id,
+          "REJECTED",
+          command,
+          `Invoice status ${invoice.status}`,
+          invoice.id
+        );
         return NextResponse.json({
-            response_type: "ephemeral",
-            text: `✅ Invoice \`${invoiceNumber}\` is already paid!`
+          response_type: "ephemeral",
+          text: `Invoice ${invoice.number} is already ${invoice.status}.`,
         });
-    }
+      }
 
-    if (!invoice.client.email) {
+      if (!invoice.client?.email) {
+        await finalizeCommandEvent(
+          event.id,
+          "REJECTED",
+          command,
+          "Client email missing for send",
+          invoice.id
+        );
         return NextResponse.json({
-            response_type: "ephemeral",
-            text: `❌ Client "${invoice.client.name}" has no email address. Please update client details in PaperChai.`
+          response_type: "ephemeral",
+          text: `Client email is required before sending ${invoice.number}. Update client contact details first.`,
         });
-    }
+      }
 
-    // Update invoice status to sent
-    await prisma.invoice.update({
-        where: { id: invoice.id },
-        data: {
-            status: "sent",
-            lastSentAt: new Date(),
+      const approvers = await getWorkspaceApprovers(connection.workspaceId);
+      if (approvers.length === 0) {
+        await finalizeCommandEvent(
+          event.id,
+          "FAILED",
+          command,
+          "No approvers configured",
+          invoice.id
+        );
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: "No workspace owner/admin found for approval. Add an admin first.",
+        });
+      }
+
+      const pending = await prisma.approvalRequest.findFirst({
+        where: {
+          workspaceId: connection.workspaceId,
+          invoiceId: invoice.id,
+          status: "PENDING",
         },
-    });
+        select: { id: true },
+      });
 
-    // Note: Actual email sending would be triggered here via your email service
-    // For now, we just update the status
+      if (pending) {
+        await finalizeCommandEvent(event.id, "EXECUTED", command, undefined, invoice.id);
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: `Invoice ${invoice.number} is already pending approval.`,
+        });
+      }
 
-    return NextResponse.json({
+      await queueInvoiceApproval({
+        workspaceId: connection.workspaceId,
+        invoiceId: invoice.id,
+        actor,
+        slackContext: {
+          teamId: team_id,
+          userId: user_id,
+          channelId: channel_id,
+          responseUrl: response_url,
+          commandText: sanitizedText,
+          eventId: event.id,
+        },
+      });
+
+      await finalizeCommandEvent(event.id, "EXECUTED", command, undefined, invoice.id);
+
+      return NextResponse.json({
         response_type: "ephemeral",
-        text: `📤 Invoice *${invoice.number}* marked as sent to ${invoice.client.name} (${invoice.client.email}).\n\n_Tip: Configure email settings in PaperChai to auto-send emails._`,
-        blocks: [
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: `📤 *Invoice ${invoice.number} sent!*`
-                }
+        text: `Invoice ${invoice.number} queued for admin approval. It will send only after approval.`,
+      });
+    }
+
+    if (command.intent === "setup") {
+      if (isReadOnlyActor) {
+        await finalizeCommandEvent(
+          event.id,
+          "REJECTED",
+          command,
+          "Viewer role cannot setup client/project"
+        );
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: "Your workspace role is VIEWER. Ask an admin/member to run setup commands.",
+        });
+      }
+
+      const missing: string[] = [];
+      if (!command.clientName) missing.push("client");
+      if (!command.projectName) missing.push("project");
+      if (missing.length > 0) {
+        await finalizeCommandEvent(
+          event.id,
+          "REJECTED",
+          command,
+          `Missing fields: ${missing.join(", ")}`
+        );
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: `Missing fields: ${missing.join(", ")}. Example: /invoice setup client:"Acme" project:"Website Revamp" email:billing@acme.com phone:+919999999999`,
+        });
+      }
+
+      if (command.email && !normalizeEmail(command.email)) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, "Invalid email format");
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: "Invalid email format. Example: email:billing@acme.com",
+        });
+      }
+
+      if (command.phone && !normalizePhone(command.phone)) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, "Invalid phone format");
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: "Invalid phone format. Use digits with optional +country code (example: phone:+919999999999).",
+        });
+      }
+
+      const clientMatch = await findOrCreateClientForCommand({
+        workspaceId: connection.workspaceId,
+        clientName: command.clientName!,
+        email: command.email,
+        phone: command.phone,
+      });
+      if (!clientMatch.ok) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, clientMatch.error);
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: clientMatch.error,
+        });
+      }
+
+      const projectMatch = await findOrCreateProjectForClient({
+        workspaceId: connection.workspaceId,
+        clientId: clientMatch.client.id,
+        projectName: command.projectName!,
+      });
+      if (!projectMatch.ok) {
+        await finalizeCommandEvent(event.id, "REJECTED", command, projectMatch.error);
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: projectMatch.error,
+        });
+      }
+
+      await finalizeCommandEvent(event.id, "EXECUTED", command);
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: `Setup complete: client "${clientMatch.client.name}" and project "${projectMatch.project.name}" are ready.`,
+      });
+    }
+
+    // create
+    if (isReadOnlyActor) {
+      await finalizeCommandEvent(
+        event.id,
+        "REJECTED",
+        command,
+        "Viewer role cannot create invoices"
+      );
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Your workspace role is VIEWER. Ask an admin/member to create invoices.",
+      });
+    }
+    const missing: string[] = [];
+    if (!command.clientName) missing.push("client");
+    if (!command.projectName) missing.push("project");
+    if (!command.amount || command.amount <= 0) missing.push("amount");
+
+    if (missing.length > 0) {
+      await finalizeCommandEvent(
+        event.id,
+        "REJECTED",
+        command,
+        `Missing fields: ${missing.join(", ")}`
+      );
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: `Missing fields: ${missing.join(", ")}. Example: /invoice create client:\"Acme\" project:\"Website Revamp\" amount:1200 due:2026-02-28 email:billing@acme.com`,
+      });
+    }
+
+    if (command.email && !normalizeEmail(command.email)) {
+      await finalizeCommandEvent(event.id, "REJECTED", command, "Invalid email format");
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Invalid email format. Example: email:billing@acme.com",
+      });
+    }
+
+    if (command.phone && !normalizePhone(command.phone)) {
+      await finalizeCommandEvent(event.id, "REJECTED", command, "Invalid phone format");
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Invalid phone format. Use digits with optional +country code (example: phone:+919999999999).",
+      });
+    }
+
+    const clientMatch = await findOrCreateClientForCommand({
+      workspaceId: connection.workspaceId,
+      clientName: command.clientName!,
+      email: command.email,
+      phone: command.phone,
+    });
+    if (!clientMatch.ok) {
+      await finalizeCommandEvent(event.id, "REJECTED", command, clientMatch.error);
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: clientMatch.error,
+      });
+    }
+
+    const contactReady = Boolean(
+      clientMatch.client.email || clientMatch.client.phone || clientMatch.client.whatsapp
+    );
+    if (!contactReady) {
+      await finalizeCommandEvent(
+        event.id,
+        "REJECTED",
+        command,
+        "Client contact missing (email/phone)"
+      );
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: `Client ${clientMatch.client.name} has no contact details. Provide email: or phone: in command.`,
+      });
+    }
+
+    const projectMatch = await findOrCreateProjectForClient({
+      workspaceId: connection.workspaceId,
+      clientId: clientMatch.client.id,
+      projectName: command.projectName!,
+    });
+    if (!projectMatch.ok) {
+      await finalizeCommandEvent(event.id, "REJECTED", command, projectMatch.error);
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: projectMatch.error,
+      });
+    }
+
+    const approvers = await getWorkspaceApprovers(connection.workspaceId);
+    if (approvers.length === 0) {
+      await finalizeCommandEvent(event.id, "FAILED", command, "No approvers configured");
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "No workspace owner/admin found for approval. Add an admin first.",
+      });
+    }
+
+    const now = new Date();
+    const parsedDueDate = parseDueDate(command.dueDate);
+    if (command.dueDate && !parsedDueDate) {
+      await finalizeCommandEvent(
+        event.id,
+        "REJECTED",
+        command,
+        "Invalid due date format. Use YYYY-MM-DD."
+      );
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Invalid due date. Use YYYY-MM-DD (example: due:2026-02-15).",
+      });
+    }
+    if (parsedDueDate && startOfDay(parsedDueDate) < startOfDay(now)) {
+      await finalizeCommandEvent(event.id, "REJECTED", command, "Due date cannot be in the past.");
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "Invalid due date. It cannot be in the past.",
+      });
+    }
+    const dueDate = parsedDueDate || addDays(now, 7);
+    const quantity = command.quantity && command.quantity > 0 ? command.quantity : 1;
+    const amount = command.amount as number;
+    const rate = command.rate && command.rate > 0 ? command.rate : amount / quantity;
+    const subtotal = Number((quantity * rate).toFixed(2));
+    const currency = command.currency || "INR";
+    const MAX_INVOICE_CREATE_ATTEMPTS = 3;
+    let invoice: {
+      id: string;
+      number: string;
+    } | null = null;
+    for (let attempt = 1; attempt <= MAX_INVOICE_CREATE_ATTEMPTS; attempt += 1) {
+      const invoiceNumber = await generateWorkspaceInvoiceNumber(connection.workspaceId);
+      try {
+        invoice = await prisma.invoice.create({
+          data: {
+            workspaceId: connection.workspaceId,
+            clientId: clientMatch.client.id,
+            projectId: projectMatch.project.id,
+            number: invoiceNumber,
+            status: "draft",
+            currency,
+            issueDate: now,
+            dueDate,
+            subtotal,
+            taxTotal: 0,
+            total: subtotal,
+            notes: command.notes || "Created via Slack command",
+            source: "slack",
+            sourceImportId: event.id,
+            items: {
+              create: [
+                {
+                  title: command.itemTitle || "Services",
+                  description: "Generated from Slack command",
+                  quantity,
+                  unitPrice: rate,
+                  taxRate: 0,
+                  total: subtotal,
+                },
+              ],
             },
-            {
-                type: "section",
-                fields: [
-                    { type: "mrkdwn", text: `*To:* ${invoice.client.name}` },
-                    { type: "mrkdwn", text: `*Email:* ${invoice.client.email}` },
-                    { type: "mrkdwn", text: `*Amount:* ${invoice.currency} ${Number(invoice.total).toLocaleString()}` },
-                ]
-            }
-        ]
-    });
-}
-
-/**
- * Handle /invoice mark-paid <number> <amount> <method> "<reference>"
- * Example: /invoice mark-paid INV-001 12000 UPI "GPay ref: xxx"
- */
-async function handleMarkPaidCommand(workspaceId: string, args: string) {
-    // Parse args: INV-001 12000 UPI "GPay ref: xxx"
-    const match = args.match(/^(\S+)\s+(\d+(?:\.\d{2})?)\s+(\w+)\s*"?([^"]*)"?$/);
-
-    if (!match) {
-        return NextResponse.json({
-            response_type: "ephemeral",
-            text: "❌ Invalid format.\n\nUsage: `/invoice mark-paid <number> <amount> <method> \"<reference>\"`\n\nExample: `/invoice mark-paid INV-001 12000 UPI \"GPay ref: abc123\"`"
+          },
+          select: {
+            id: true,
+            number: true,
+          },
         });
+        break;
+      } catch (error) {
+        const isUniqueConflict =
+          error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+        if (!isUniqueConflict || attempt === MAX_INVOICE_CREATE_ATTEMPTS) {
+          throw error;
+        }
+      }
     }
-
-    const [, invoiceNumber, amountStr, method, reference] = match;
-    const amount = parseFloat(amountStr);
-
-    const invoice = await prisma.invoice.findFirst({
-        where: {
-            workspaceId,
-            number: invoiceNumber.toUpperCase(),
-        },
-        include: {
-            client: { select: { name: true } },
-        },
-    });
-
     if (!invoice) {
-        return NextResponse.json({
-            response_type: "ephemeral",
-            text: `❌ Invoice \`${invoiceNumber}\` not found.`
-        });
+      throw new Error("Failed to create invoice");
     }
 
-    if (invoice.status === "paid") {
-        return NextResponse.json({
-            response_type: "ephemeral",
-            text: `✅ Invoice \`${invoiceNumber}\` is already marked as paid.`
-        });
-    }
-
-    const invoiceTotal = Number(invoice.total);
-    const isPartial = amount < invoiceTotal;
-    const isOverpaid = amount > invoiceTotal;
-
-    // Update invoice status
-    await prisma.invoice.update({
-        where: { id: invoice.id },
-        data: {
-            status: "paid",
-            notes: `${invoice.notes || ""}\n\n[Payment] ${new Date().toISOString()}: ${invoice.currency} ${amount} via ${method.toUpperCase()}${reference ? ` - Ref: ${reference}` : ""}`.trim(),
-        },
+    await queueInvoiceApproval({
+      workspaceId: connection.workspaceId,
+      invoiceId: invoice.id,
+      actor,
+      slackContext: {
+        teamId: team_id,
+        userId: user_id,
+        channelId: channel_id,
+        responseUrl: response_url,
+        commandText: sanitizedText,
+        eventId: event.id,
+      },
     });
 
-    // Stop reminders if enabled
-    if (invoice.remindersEnabled) {
-        await prisma.invoice.update({
-            where: { id: invoice.id },
-            data: { remindersEnabled: false },
-        });
-    }
+    await finalizeCommandEvent(event.id, "EXECUTED", command, undefined, invoice.id);
 
-    let message = `✅ *Invoice ${invoice.number} marked as PAID!*`;
-    if (isPartial) {
-        message += `\n\n⚠️ _Partial payment: ${invoice.currency} ${amount} of ${invoice.currency} ${invoiceTotal}_`;
-    } else if (isOverpaid) {
-        message += `\n\n💰 _Overpayment: ${invoice.currency} ${amount} received (invoice was ${invoice.currency} ${invoiceTotal})_`;
+    return NextResponse.json({
+      response_type: "ephemeral",
+      text: `Draft ${invoice.number} created for ${clientMatch.client.name} / ${projectMatch.project.name} (${currency} ${subtotal.toLocaleString()}) and queued for approval.`,
+    });
+  } catch (error) {
+    try {
+      if (event?.id) {
+        await prisma.botCommandEvent.update({
+          where: { id: event.id },
+          data: {
+            status: "FAILED",
+            errorMessage: error instanceof Error ? error.message : "Slack command failed",
+            processedAt: new Date(),
+          },
+        });
+      }
+    } catch (logError) {
+      console.error("[Slack Commands] Failed to persist command error state", logError);
     }
 
     return NextResponse.json({
-        response_type: "in_channel", // Visible to everyone
-        text: message,
-        blocks: [
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: `✅ *Invoice ${invoice.number} — PAID*`
-                }
-            },
-            {
-                type: "section",
-                fields: [
-                    { type: "mrkdwn", text: `*Client:* ${invoice.client.name}` },
-                    { type: "mrkdwn", text: `*Amount:* ${invoice.currency} ${amount.toLocaleString()}` },
-                    { type: "mrkdwn", text: `*Method:* ${method.toUpperCase()}` },
-                    { type: "mrkdwn", text: reference ? `*Ref:* ${reference}` : `*Ref:* —` },
-                ]
-            },
-            {
-                type: "context",
-                elements: [
-                    {
-                        type: "mrkdwn",
-                        text: isPartial ? `⚠️ Partial payment (${invoice.currency} ${invoiceTotal - amount} remaining)` : "Payment recorded via Slack"
-                    }
-                ]
-            }
-        ]
+      response_type: "ephemeral",
+      text: "Command failed. Please try again or run /invoice help.",
     });
+  }
+}
+
+async function resolveConnectionBySlackAuth(
+  teamId: string
+): Promise<SlackConnectionCandidate | null> {
+  const candidates = await prisma.integrationConnection.findMany({
+    where: {
+      provider: "SLACK",
+      status: "CONNECTED",
+      accessToken: { not: null },
+    },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      workspaceId: true,
+      accessToken: true,
+      providerWorkspaceId: true,
+      providerWorkspaceName: true,
+    },
+    take: SLACK_FALLBACK_MAX_CANDIDATES,
+  });
+
+  if (candidates.length === 0) return null;
+
+  const matched: SlackConnectionCandidate[] = [];
+  const deadline = Date.now() + SLACK_FALLBACK_BUDGET_MS;
+  for (const candidate of candidates) {
+    if (Date.now() > deadline) break;
+    if (!candidate.accessToken) continue;
+    try {
+      const token = decrypt(candidate.accessToken);
+      const auth = await testAuth(token);
+      if (auth.ok && auth.team_id === teamId) {
+        matched.push(candidate);
+      } else if (isProviderAuthError("SLACK", auth.error)) {
+        await markIntegrationConnectionError({
+          connectionId: candidate.id,
+          provider: "SLACK",
+          reason: getReconnectMessage("SLACK"),
+        });
+      }
+    } catch {
+      // Ignore invalid candidate token; command flow will continue to other candidates.
+    }
+  }
+
+  if (matched.length === 0) return null;
+  if (matched.length > 1) {
+    console.error("[Slack Commands] Ambiguous fallback mapping for team", {
+      teamId,
+      workspaceIds: matched.map((c) => c.workspaceId),
+    });
+    return null;
+  }
+
+  const winner = matched[0];
+  await prisma.integrationConnection.update({
+    where: { id: winner.id },
+    data: {
+      status: "CONNECTED",
+      providerWorkspaceId: teamId,
+      lastError: null,
+      lastErrorAt: null,
+      updatedAt: new Date(),
+    },
+  });
+
+  return winner;
+}
+
+function checkSlackCommandRateLimit(teamId: string, userId: string): { allowed: boolean } {
+  const now = Date.now();
+  if (slackCommandRateLimitStore.size > 5000) {
+    for (const [key, value] of slackCommandRateLimitStore.entries()) {
+      if (now > value.resetAt) slackCommandRateLimitStore.delete(key);
+    }
+  }
+  const key = `${teamId}:${userId}`;
+  const current = slackCommandRateLimitStore.get(key);
+  const usage =
+    !current || now > current.resetAt
+      ? { count: 0, resetAt: now + SLACK_COMMAND_WINDOW_MS }
+      : current;
+
+  if (usage.count >= SLACK_COMMAND_LIMIT_PER_USER) {
+    return { allowed: false };
+  }
+
+  usage.count += 1;
+  slackCommandRateLimitStore.set(key, usage);
+  return { allowed: true };
+}
+
+function sanitizeSlackCommandText(input: string): string {
+  if (!input) return "";
+  return input
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\0/g, "")
+    .trim();
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function parseDueDate(value?: string): Date | null {
+  if (!value) return null;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  const date = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function startOfDay(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+async function createCommandEvent(input: {
+  workspaceId: string;
+  externalEventId: string;
+  teamId: string;
+  userId: string;
+  channelId: string;
+  responseUrl: string;
+  rawText: string;
+  commandIntent: string;
+}) {
+  try {
+    return await prisma.botCommandEvent.create({
+      data: {
+        workspaceId: input.workspaceId,
+        source: "SLACK",
+        status: "RECEIVED",
+        externalEventId: input.externalEventId,
+        providerWorkspaceId: input.teamId,
+        actorExternalId: input.userId,
+        command: input.commandIntent,
+        rawText: input.rawText,
+        channelId: input.channelId,
+        responseUrl: input.responseUrl,
+      },
+      select: { id: true },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function finalizeCommandEvent(
+  eventId: string,
+  status: "EXECUTED" | "REJECTED" | "FAILED",
+  parsedData: unknown,
+  errorMessage?: string,
+  linkedInvoiceId?: string
+) {
+  await prisma.botCommandEvent.update({
+    where: { id: eventId },
+    data: {
+      status,
+      parsedData: parsedData as Prisma.InputJsonValue,
+      errorMessage,
+      linkedInvoiceId,
+      processedAt: new Date(),
+    },
+  });
+}
+
+async function resolveSlackActor(input: {
+  workspaceId: string;
+  externalUserId: string;
+  accessToken: string;
+}): Promise<SlackActor | null> {
+  const identity = await prisma.integrationIdentity.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      provider: "SLACK",
+      externalUserId: input.externalUserId,
+      active: true,
+    },
+    select: {
+      internalUserId: true,
+      user: {
+        select: {
+          memberships: {
+            where: {
+              workspaceId: input.workspaceId,
+              removedAt: null,
+            },
+            select: { role: true },
+            take: 1,
+          },
+        },
+      },
+    },
+  });
+
+  if (identity?.user.memberships.length) {
+    return {
+      internalUserId: identity.internalUserId,
+      role: identity.user.memberships[0].role,
+    };
+  }
+
+  const slackUser = await getUserInfo(input.accessToken, input.externalUserId);
+  const email = slackUser.user?.profile?.email;
+  if (!email) return null;
+
+  const member = await prisma.workspaceMember.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      removedAt: null,
+      user: {
+        email: { equals: email, mode: "insensitive" },
+      },
+    },
+    select: {
+      userId: true,
+      role: true,
+    },
+  });
+
+  if (!member) return null;
+
+  await prisma.integrationIdentity.upsert({
+    where: {
+      workspaceId_provider_externalUserId: {
+        workspaceId: input.workspaceId,
+        provider: "SLACK",
+        externalUserId: input.externalUserId,
+      },
+    },
+    create: {
+      workspaceId: input.workspaceId,
+      provider: "SLACK",
+      externalUserId: input.externalUserId,
+      internalUserId: member.userId,
+      roleSnapshot: member.role,
+      metadata: { email },
+      active: true,
+    },
+    update: {
+      internalUserId: member.userId,
+      roleSnapshot: member.role,
+      metadata: { email },
+      active: true,
+    },
+  });
+
+  return {
+    internalUserId: member.userId,
+    role: member.role,
+  };
+}
+
+async function queueInvoiceApproval(input: {
+  workspaceId: string;
+  invoiceId: string;
+  actor: SlackActor;
+  slackContext: {
+    teamId: string;
+    userId: string;
+    channelId: string;
+    responseUrl: string;
+    commandText: string;
+    eventId: string;
+  };
+}) {
+  const approvers = await getWorkspaceApprovers(input.workspaceId);
+  const now = new Date();
+  const expiresAt = addDays(now, 3);
+
+  await prisma.$transaction(async (tx) => {
+    const invoice = await tx.invoice.findUnique({
+      where: { id: input.invoiceId },
+      select: { sendMeta: true },
+    });
+
+    const sendMeta = (invoice?.sendMeta as Record<string, any> | null) || {};
+    const existingAutomation = (sendMeta.automation as Record<string, any> | null) || {};
+
+    await tx.invoice.update({
+      where: { id: input.invoiceId },
+      data: {
+        status: "draft",
+        sendMeta: {
+          ...sendMeta,
+          automation: {
+            ...existingAutomation,
+            source: "SLACK_COMMAND",
+            approvalStatus: "PENDING",
+            approvalRequestedAt: now.toISOString(),
+            approvalRequestedTo: approvers.map((approver) => approver.userId),
+            requestedByUserId: input.actor.internalUserId,
+            scheduledSendAt: null,
+            slack: {
+              teamId: input.slackContext.teamId,
+              requestedBySlackUserId: input.slackContext.userId,
+              channelId: input.slackContext.channelId,
+              responseUrl: input.slackContext.responseUrl,
+              commandText: input.slackContext.commandText,
+              commandEventId: input.slackContext.eventId,
+            },
+          },
+        },
+      },
+    });
+
+    await tx.approvalRequest.create({
+      data: {
+        workspaceId: input.workspaceId,
+        entityType: "INVOICE",
+        invoiceId: input.invoiceId,
+        status: "PENDING",
+        requestedByUserId: input.actor.internalUserId,
+        requestedByExternalId: input.slackContext.userId,
+        source: "SLACK",
+        expiresAt,
+        metadata: {
+          teamId: input.slackContext.teamId,
+          channelId: input.slackContext.channelId,
+          responseUrl: input.slackContext.responseUrl,
+          commandText: input.slackContext.commandText,
+          commandEventId: input.slackContext.eventId,
+        },
+      },
+    });
+  });
+}
+
+async function findOrCreateClientForCommand(input: {
+  workspaceId: string;
+  clientName: string;
+  email?: string;
+  phone?: string;
+}): Promise<
+  | {
+      ok: true;
+      client: {
+        id: string;
+        name: string;
+        email: string | null;
+        phone: string | null;
+        whatsapp: string | null;
+      };
+    }
+  | { ok: false; error: string }
+> {
+  const normalizedName = input.clientName.trim();
+  if (!normalizedName) {
+    return { ok: false, error: 'Client is required (client:"Name").' };
+  }
+
+  const normalizedEmail = normalizeEmail(input.email);
+  const normalizedPhone = normalizePhone(input.phone);
+
+  const exact = await prisma.client.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      name: { equals: normalizedName, mode: "insensitive" },
+    },
+    select: { id: true, name: true, email: true, phone: true, whatsapp: true },
+  });
+
+  if (exact) {
+    const shouldUpdateEmail = normalizedEmail && !exact.email;
+    const shouldUpdatePhone = normalizedPhone && !exact.phone;
+    const shouldUpdateWhatsapp = normalizedPhone && !exact.whatsapp;
+
+    if (shouldUpdateEmail || shouldUpdatePhone || shouldUpdateWhatsapp) {
+      const updated = await prisma.client.update({
+        where: { id: exact.id },
+        data: {
+          email: shouldUpdateEmail ? normalizedEmail : undefined,
+          phone: shouldUpdatePhone ? normalizedPhone : undefined,
+          whatsapp: shouldUpdateWhatsapp ? normalizedPhone : undefined,
+        },
+        select: { id: true, name: true, email: true, phone: true, whatsapp: true },
+      });
+      return { ok: true, client: updated };
+    }
+    return { ok: true, client: exact };
+  }
+
+  const matches = await prisma.client.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      name: { contains: normalizedName, mode: "insensitive" },
+    },
+    orderBy: { name: "asc" },
+    take: 5,
+    select: { id: true, name: true, email: true, phone: true, whatsapp: true },
+  });
+
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      error: `Multiple clients matched "${normalizedName}": ${matches.map((m) => m.name).join(", ")}. Use exact client name.`,
+    };
+  }
+
+  if (matches.length === 1) {
+    const matched = matches[0];
+    const shouldUpdateEmail = normalizedEmail && !matched.email;
+    const shouldUpdatePhone = normalizedPhone && !matched.phone;
+    const shouldUpdateWhatsapp = normalizedPhone && !matched.whatsapp;
+    if (shouldUpdateEmail || shouldUpdatePhone || shouldUpdateWhatsapp) {
+      const updated = await prisma.client.update({
+        where: { id: matched.id },
+        data: {
+          email: shouldUpdateEmail ? normalizedEmail : undefined,
+          phone: shouldUpdatePhone ? normalizedPhone : undefined,
+          whatsapp: shouldUpdateWhatsapp ? normalizedPhone : undefined,
+        },
+        select: { id: true, name: true, email: true, phone: true, whatsapp: true },
+      });
+      return { ok: true, client: updated };
+    }
+    return { ok: true, client: matched };
+  }
+
+  if (!normalizedEmail && !normalizedPhone) {
+    return {
+      ok: false,
+      error: `Client "${normalizedName}" does not exist. Provide email: or phone: to create client from Slack.`,
+    };
+  }
+
+  const created = await prisma.client.create({
+    data: {
+      workspaceId: input.workspaceId,
+      name: normalizedName,
+      email: normalizedEmail,
+      phone: normalizedPhone,
+      whatsapp: normalizedPhone,
+    },
+    select: { id: true, name: true, email: true, phone: true, whatsapp: true },
+  });
+
+  return { ok: true, client: created };
+}
+
+async function findOrCreateProjectForClient(input: {
+  workspaceId: string;
+  clientId: string;
+  projectName: string;
+}): Promise<{ ok: true; project: { id: string; name: string } } | { ok: false; error: string }> {
+  const normalizedName = input.projectName.trim();
+  if (!normalizedName) {
+    return { ok: false, error: 'Project is required (project:"Name").' };
+  }
+
+  const exact = await prisma.project.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      clientId: input.clientId,
+      name: { equals: normalizedName, mode: "insensitive" },
+    },
+    select: { id: true, name: true },
+  });
+  if (exact) {
+    return { ok: true, project: exact };
+  }
+
+  const matches = await prisma.project.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      clientId: input.clientId,
+      name: { contains: normalizedName, mode: "insensitive" },
+    },
+    orderBy: { name: "asc" },
+    take: 5,
+    select: { id: true, name: true },
+  });
+
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      error: `Multiple projects matched "${normalizedName}": ${matches.map((p) => p.name).join(", ")}. Use exact project name.`,
+    };
+  }
+
+  if (matches.length === 1) {
+    return { ok: true, project: matches[0] };
+  }
+
+  const created = await prisma.project.create({
+    data: {
+      workspaceId: input.workspaceId,
+      clientId: input.clientId,
+      name: normalizedName,
+      status: "ACTIVE",
+    },
+    select: { id: true, name: true },
+  });
+
+  return { ok: true, project: created };
+}
+
+function normalizeEmail(value?: string): string | undefined {
+  if (!value) return undefined;
+  const email = value.trim().toLowerCase();
+  if (!email) return undefined;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return undefined;
+  return email;
+}
+
+function normalizePhone(value?: string): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value.replace(/[^\d+]/g, "").trim();
+  if (!cleaned) return undefined;
+  const digitCount = cleaned.replace(/\D/g, "").length;
+  if (digitCount < 7 || digitCount > 15) return undefined;
+  return cleaned;
+}
+
+function helpResponse() {
+  return NextResponse.json({
+    response_type: "ephemeral",
+    text: "PaperChai /invoice commands",
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "*Commands*",
+        },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: '`/invoice create client:"Acme" project:"Website Revamp" amount:1200 due:2026-02-28 email:billing@acme.com phone:+919999999999`\\nCreates/updates client + project, drafts invoice, queues approval.',
+        },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: '`/invoice setup client:"Acme" project:"Website Revamp" email:billing@acme.com phone:+919999999999`\\nCreates/updates client + project only (no invoice).',
+        },
+      },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text: "Create requires: client, project, amount. For new clients include at least email or phone.",
+          },
+        ],
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "`/invoice send INV-0001`\\nQueues existing invoice for approval before send.",
+        },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "`/invoice status INV-0001`\\nReturns invoice status.",
+        },
+      },
+    ],
+  });
 }

@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { generateContentSafe } from "@/lib/ai-service";
 import { AI_CONFIG } from "@/lib/ai-config";
+import {
+  assertWorkspaceFeature,
+  getWorkspaceEntitlement,
+  serializeEntitlementError,
+} from "@/lib/entitlements";
 
 export type ExtractedBillableItem = {
   title: string;
@@ -79,6 +84,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!workspace) {
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
+    const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+    if (!membership) {
+      return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+    }
+    if (!canWriteWorkspace(membership.role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "ai");
+    } catch (error) {
+      return NextResponse.json(serializeEntitlementError(error), {
+        status: (error as any)?.statusCode || 403,
+      });
+    }
 
     const { id } = await params;
     const projectId = id;
@@ -151,6 +171,7 @@ Content: ${extract?.rawText || extract?.content || JSON.stringify(extract) || "N
     // Call AI to extract billable items
     const prompt = EXTRACTION_PROMPT.replace("{DOCUMENT_TEXT}", combinedText);
 
+    const entitlement = await getWorkspaceEntitlement(workspace.id, session.user.id);
     const result = await generateContentSafe({
       modelName: AI_CONFIG.features.extraction.model,
       fallbackModelName: AI_CONFIG.features.extraction.fallback,
@@ -160,6 +181,7 @@ Content: ${extract?.rawText || extract?.content || JSON.stringify(extract) || "N
         maxOutputTokens: 4096,
       },
       userId: session.user.id,
+      userTier: entitlement.platformBypass ? "PREMIER" : entitlement.planCode,
     });
 
     // Parse AI response

@@ -4,9 +4,14 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { z } from "zod";
+import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
+import { assertLimit } from "@/lib/usage";
+
+const RUNNER_SUPPORTED_TRIGGERS = new Set(["MILESTONE_DUE", "INVOICE_OVERDUE"]);
 
 const createAutomationSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).max(255),
   description: z.string().optional(),
   trigger: z.enum([
     "NOTION_STATUS_CHANGE",
@@ -37,15 +42,21 @@ export async function GET() {
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+      return NextResponse.json({
+        automations: [],
+        workspaceReady: false,
+        error: "No workspace found",
+      });
     }
-
-    // DEBUG: Check if automationRule exists on prisma client
-    console.log(
-      "[DEBUG] Prisma Keys:",
-      Object.keys(prisma).filter((k) => !k.startsWith("_") && !k.startsWith("$"))
-    );
-    console.log("[DEBUG] Has automationRule?", !!(prisma as any).automationRule);
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "automation");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
+    }
 
     const automations = await prisma.automationRule.findMany({
       where: {
@@ -61,6 +72,7 @@ export async function GET() {
     });
 
     return NextResponse.json({
+      workspaceReady: true,
       automations: automations.map((a) => ({
         id: a.id,
         name: a.name,
@@ -88,24 +100,71 @@ export async function GET() {
 // POST /api/automation/rules - Create new automation rule
 export async function POST(request: NextRequest) {
   try {
-    console.log("[AUTOMATION_POST] Starting request processing");
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
-      console.log("[AUTOMATION_POST] Unauthorized: No session");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
     if (!workspace) {
-      console.log("[AUTOMATION_POST] No workspace found");
-      return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "No workspace found", code: "WORKSPACE_NOT_READY" },
+        { status: 409 }
+      );
+    }
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "automation");
+      await assertLimit(workspace.id, session.user.id, "automationRules");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
+    }
+    const canManage = await isWorkspaceApprover(workspace.id, session.user.id);
+    if (!canManage) {
+      return NextResponse.json(
+        { error: "Only workspace owners/admins can manage automation rules" },
+        { status: 403 }
+      );
     }
 
-    const body = await request.json();
-    console.log("[AUTOMATION_POST] Received body:", JSON.stringify(body, null, 2));
+    const validated = createAutomationSchema.parse(await request.json());
 
-    const validated = createAutomationSchema.parse(body);
-    console.log("[AUTOMATION_POST] Validation successful. Creating record...");
+    if (
+      (validated.scope === "SELECTED_CLIENTS" || validated.scope === "SPECIFIC_CLIENT") &&
+      validated.scopeValue
+    ) {
+      const clientIds = validated.scopeValue
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+      if (clientIds.length > 0) {
+        const clientsInWorkspace = await prisma.client.count({
+          where: {
+            id: { in: clientIds },
+            workspaceId: workspace.id,
+          },
+        });
+        if (clientsInWorkspace !== clientIds.length) {
+          return NextResponse.json(
+            { error: "Some selected clients are not in this workspace" },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    if (!RUNNER_SUPPORTED_TRIGGERS.has(validated.trigger)) {
+      return NextResponse.json(
+        {
+          error: "Trigger is not supported yet",
+          details: `Supported triggers: ${Array.from(RUNNER_SUPPORTED_TRIGGERS).join(", ")}`,
+        },
+        { status: 422 }
+      );
+    }
 
     // Create automation rule
     const automation = await prisma.automationRule.create({
@@ -125,8 +184,6 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    console.log("[AUTOMATION_POST] Created automation:", automation.id);
-
     return NextResponse.json({
       automation: {
         id: automation.id,
@@ -140,7 +197,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      console.error("[AUTOMATION_POST] Validation Error:", JSON.stringify(error.issues, null, 2));
       return NextResponse.json(
         { error: "Invalid request data", details: error.issues },
         { status: 400 }

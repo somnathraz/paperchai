@@ -9,7 +9,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { requirePremium } from "@/lib/middleware/premium-check";
-import { generateOAuthState } from "@/lib/notion-client";
+import { generateOAuthState, getNotionOAuthRedirectUri } from "@/lib/notion-client";
+import { requireIntegrationManager } from "@/lib/integrations/access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,13 +22,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 2. Premium Check (Temporarily disabled for development)
-    // const premiumError = await requirePremium(request);
-    // if (premiumError) {
-    //     return NextResponse.redirect(
-    //         new URL("/settings/billing?error=premium_required&feature=notion", request.url)
-    //     );
-    // }
+    // 2. Plan check
+    const premiumError = await requirePremium(request);
+    if (premiumError) {
+      return NextResponse.redirect(
+        new URL("/settings/billing?error=feature_not_available&feature=notion", request.url)
+      );
+    }
     // 3. Get or create workspace
     const { ensureActiveWorkspace } = await import("@/lib/workspace");
     const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
@@ -36,6 +37,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(
         new URL("/settings/workspace?error=workspace_creation_failed", request.url)
       );
+    }
+    const canManage = await requireIntegrationManager(session.user.id, workspace.id);
+    if (!canManage) {
+      return NextResponse.redirect(new URL("/settings/integrations?error=forbidden", request.url));
     }
 
     // 4. Generate CSRF state
@@ -51,13 +56,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // IMPORTANT: Redirect URI must EXACTLY match what's registered in Notion integration
-    // Production: https://paperchaiapp.com/api/integrations/notion/oauth/callback
-    // Development: http://localhost:3000/api/integrations/notion/oauth/callback
-    const redirectUri =
-      process.env.NODE_ENV === "production"
-        ? "https://paperchaiapp.com/api/integrations/notion/oauth/callback"
-        : "http://localhost:3000/api/integrations/notion/oauth/callback";
+    // Must exactly match the URL registered in Notion integration settings.
+    const redirectUri = getNotionOAuthRedirectUri();
 
     const notionAuthUrl = new URL("https://api.notion.com/v1/oauth/authorize");
     notionAuthUrl.searchParams.set("client_id", clientId);

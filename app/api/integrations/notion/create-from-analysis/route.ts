@@ -3,7 +3,13 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { resolveIntegrationWorkspace, requireIntegrationManager } from "@/lib/integrations/access";
+import {
+  assertWorkspaceFeature,
+  getWorkspaceEntitlement,
+  serializeEntitlementError,
+} from "@/lib/entitlements";
+import { assertLimit } from "@/lib/usage";
 
 // Schema for creating from analysis
 const createSchema = z.object({
@@ -21,9 +27,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+    const workspace = await resolveIntegrationWorkspace(session.user.id, session.user.name);
     if (!workspace) {
       return NextResponse.json({ error: "No active workspace" }, { status: 400 });
+    }
+    const canManage = await requireIntegrationManager(session.user.id, workspace.id);
+    if (!canManage) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "integrations");
+    } catch (error) {
+      return NextResponse.json(serializeEntitlementError(error), {
+        status: (error as any)?.statusCode || 403,
+      });
     }
 
     const body = await request.json();
@@ -38,6 +56,7 @@ export async function POST(request: NextRequest) {
 
     const { entityType, data, notionPageId, notionDatabaseId, notionPageTitle } = validated.data;
     const workspaceId = workspace.id;
+    const entitlement = await getWorkspaceEntitlement(workspace.id, session.user.id);
 
     // Get connection to link
     const connection = await prisma.integrationConnection.findUnique({
@@ -59,6 +78,8 @@ export async function POST(request: NextRequest) {
     let createdEntity: any = null;
 
     if (entityType === "project") {
+      await assertLimit(workspace.id, session.user.id, "projects");
+
       // Check for client first
       let clientId: string | null = null;
 
@@ -81,6 +102,7 @@ export async function POST(request: NextRequest) {
           if (existingClient) {
             clientId = existingClient.id;
           } else {
+            await assertLimit(workspace.id, session.user.id, "clients");
             // Create new client with full details from object or just name from string
             const newClient = await prisma.client.create({
               data: {
@@ -153,6 +175,7 @@ export async function POST(request: NextRequest) {
         }
       }
     } else if (entityType === "client") {
+      await assertLimit(workspace.id, session.user.id, "clients");
       createdEntity = await prisma.client.create({
         data: {
           workspaceId,
@@ -190,11 +213,12 @@ export async function POST(request: NextRequest) {
 
       // 🚀 Suggest Automations for projects
       let suggestedAutomations = 0;
-      if (entityType === "project" && createdEntity) {
+      if (entityType === "project" && createdEntity && entitlement.features.automation) {
         const projectName = createdEntity.name;
 
         // Suggestion 1: Auto-invoice when milestones are due
         try {
+          await assertLimit(workspace.id, session.user.id, "automationRules");
           await prisma.automationRule.create({
             data: {
               workspaceId,
@@ -216,6 +240,7 @@ export async function POST(request: NextRequest) {
 
         // Suggestion 2: Payment reminders for this project
         try {
+          await assertLimit(workspace.id, session.user.id, "automationRules");
           await prisma.automationRule.create({
             data: {
               workspaceId,
@@ -249,6 +274,10 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   } catch (error) {
+    const serialized = serializeEntitlementError(error);
+    if (serialized) {
+      return NextResponse.json(serialized.body, { status: serialized.status });
+    }
     console.error("Create from analysis error:", error);
     return NextResponse.json({ error: "Failed to create entity" }, { status: 500 });
   }

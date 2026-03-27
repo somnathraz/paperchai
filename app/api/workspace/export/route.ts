@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -17,6 +18,13 @@ export async function GET() {
 
     if (!workspace) {
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+    }
+    const canExport = await isWorkspaceApprover(workspace.id, session.user.id);
+    if (!canExport) {
+      return NextResponse.json(
+        { error: "Only workspace owners/admins can export workspace data" },
+        { status: 403 }
+      );
     }
 
     // Fetch full workspace data for export

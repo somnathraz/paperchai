@@ -3,17 +3,18 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
+import { isWorkspaceApprover } from "@/lib/invoices/approval-routing";
 
 // GET /api/user/settings - Get user preferences
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
+      where: { id: session.user.id },
     });
 
     if (!user) {
@@ -63,13 +64,13 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Check user existence
     const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
+      where: { id: session.user.id },
     });
 
     if (!user) {
@@ -82,6 +83,13 @@ export async function POST(req: NextRequest) {
 
     if (!workspace) {
       return NextResponse.json({ error: "No workspace" }, { status: 404 });
+    }
+    const canManage = await isWorkspaceApprover(workspace.id, session.user.id);
+    if (!canManage) {
+      return NextResponse.json(
+        { error: "Only workspace owners/admins can update workspace defaults" },
+        { status: 403 }
+      );
     }
 
     const body = await req.json();

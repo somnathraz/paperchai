@@ -265,7 +265,8 @@ export async function POST(req: NextRequest) {
             const invoices = await prisma.invoice.findMany({
               where: {
                 ...scopeFilters.invoiceWhere,
-                status: "overdue",
+                dueDate: { lte: now },
+                status: { in: ["sent", "overdue"] },
               },
               include: {
                 reminderSchedule: true,
@@ -299,6 +300,13 @@ export async function POST(req: NextRequest) {
 
                 try {
                   await prisma.$transaction(async (tx) => {
+                    if (invoice.status === "sent") {
+                      await tx.invoice.update({
+                        where: { id: invoice.id },
+                        data: { status: "overdue" },
+                      });
+                    }
+
                     await tx.invoice.update({
                       where: { id: invoice.id },
                       data: { remindersEnabled: true },

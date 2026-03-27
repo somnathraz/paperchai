@@ -25,7 +25,13 @@ import {
   AiBudgetTier,
 } from "@/lib/ai-budget";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
+import {
+  assertWorkspaceFeature,
+  getWorkspaceEntitlement,
+  serializeEntitlementError,
+} from "@/lib/entitlements";
+import { TIER_LIMITS } from "@/lib/tier-limits";
 
 type GenerateRequest = {
   prompt: string;
@@ -51,8 +57,25 @@ export async function POST(request: NextRequest) {
     if (!workspace) {
       return NextResponse.json({ error: "No active workspace" }, { status: 400 });
     }
+    const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+    if (!membership) {
+      return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+    }
+    if (!canWriteWorkspace(membership.role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     workspaceId = workspace.id; // Store for cleanup
-    const tier = ((session.user as any).tier || "FREE") as AiBudgetTier;
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "ai");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      throw error;
+    }
+    const entitlement = await getWorkspaceEntitlement(workspace.id, session.user.id);
+    const tier = (entitlement.platformBypass ? "PREMIER" : entitlement.planCode) as AiBudgetTier;
 
     // 3. Parse request
     const body: GenerateRequest = await request.json();
@@ -129,7 +152,7 @@ export async function POST(request: NextRequest) {
 
     // 9. Call Gemini with ENDPOINT-CONTROLLED system prompt
     const response = await generateAI({
-      modelName: AI_CONFIG.features.extraction.model,
+      modelName: TIER_LIMITS[tier].models.extraction,
       fallbackModelName: AI_CONFIG.features.extraction.fallback,
       systemInstruction: SYSTEM_PROMPTS.extract_invoice_items, // Strict system prompt
       generationConfig: {

@@ -12,6 +12,8 @@ import { RecentActivitySection } from "@/features/automation/components/RecentAc
 import { TemplateEditorDrawer } from "@/features/automation/components/TemplateEditorDrawer";
 import { AutomationWizard } from "@/features/automation/components/AutomationWizard";
 import { AutomationSuggestions } from "@/features/automation/components/AutomationSuggestions";
+import { RecurringPlansSection } from "@/features/automation/components/RecurringPlansSection";
+import { useAutomation } from "@/features/automation/hooks/useAutomation";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -117,6 +119,8 @@ type TemplateEditorTemplate = EmailTemplate & {
 export function AutomationPageContent() {
   const router = useRouter();
   const activityRef = useRef<HTMLDivElement>(null);
+  const { integrationStatus } = useAutomation();
+  const canManageAutomations = integrationStatus?.canManageIntegrations ?? false;
 
   // Prerequisites state
   const [prerequisites, setPrerequisites] = useState<Prerequisites | null>(null);
@@ -206,6 +210,79 @@ export function AutomationPageContent() {
     });
   };
 
+  // Build steps based on trigger type - different triggers have different workflows
+  const buildStepsForTrigger = (
+    trigger: string,
+    sequence: string,
+    channels: string[] = []
+  ): AutomationStep[] => {
+    const preferredChannel = (channels.find(
+      (channel) => channel === "email" || channel === "whatsapp" || channel === "slack"
+    ) || "email") as AutomationStep["channel"];
+
+    // Get the sequence-based reminder steps (with day intervals like T-3d, T+7d)
+    const reminderSteps = buildSteps(sequence, channels);
+
+    switch (trigger) {
+      case "NOTION_STATUS_CHANGE":
+        // Notion trigger: Create invoice first, then apply reminder sequence
+        return [
+          {
+            timing: "On Trigger",
+            channel: preferredChannel,
+            template: "📥 Notion status detected",
+          },
+          { timing: "Immediate", channel: preferredChannel, template: "📝 Draft invoice created" },
+          ...reminderSteps.map((step) => ({
+            ...step,
+            template: `📧 ${step.template}`,
+          })),
+        ];
+      case "MILESTONE_DUE":
+        // Milestone trigger: Create invoice, then apply reminder sequence
+        return [
+          {
+            timing: "On Due",
+            channel: preferredChannel,
+            template: "🎯 Milestone due date reached",
+          },
+          { timing: "Immediate", channel: preferredChannel, template: "📝 Invoice generated" },
+          ...reminderSteps.map((step) => ({
+            ...step,
+            template: `📧 ${step.template}`,
+          })),
+        ];
+      case "PROJECT_STARTED":
+        // Project trigger: Configure reminders with sequence timings
+        return [
+          { timing: "On Create", channel: preferredChannel, template: "🚀 Project created" },
+          ...reminderSteps.map((step) => ({
+            ...step,
+            template: `⏰ ${step.template} (scheduled)`,
+          })),
+        ];
+      case "SLACK_THREAD_TAG":
+        // Slack trigger: Identify client, then apply reminder sequence
+        return [
+          { timing: "On Tag", channel: "slack", template: "💸 Thread tagged" },
+          { timing: "Immediate", channel: preferredChannel, template: "👤 Client identified" },
+          ...reminderSteps.map((step) => ({
+            ...step,
+            template: `📧 ${step.template}`,
+          })),
+        ];
+      case "INVOICE_OVERDUE":
+        // Invoice overdue: Pure reminder sequence
+        return reminderSteps;
+      default:
+        // Default: Show the reminder sequence
+        return [
+          { timing: "On Trigger", channel: preferredChannel, template: "⚡ Automation triggered" },
+          ...reminderSteps,
+        ];
+    }
+  };
+
   const buildLinkedTemplates = (sequence: string) => {
     const steps = sequenceTemplates[sequence] || sequenceTemplates.STANDARD;
     const uniqueSlugs = Array.from(
@@ -230,19 +307,27 @@ export function AutomationPageContent() {
     setIsLoadingAutomations(true);
     try {
       const response = await fetch("/api/automation/rules");
-      if (response.ok) {
-        const data = await response.json();
-        const normalized = (data.automations || []).map((automation: any) => ({
-          ...automation,
-          lastRun: automation.lastRunAt || undefined,
-          nextRun: automation.nextRunAt || undefined,
-          triggerLabel: triggerLabels[automation.trigger] || automation.trigger,
-          scopeLabel: formatScopeLabel(automation.scope, automation.scopeValue),
-        }));
-        setAutomations(normalized);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 401) {
+          router.push("/login");
+          return;
+        }
+        throw new Error(getAutomationErrorMessage(data, "Failed to load automations"));
       }
+
+      const normalized = (data.automations || []).map((automation: any) => ({
+        ...automation,
+        lastRun: automation.lastRunAt || undefined,
+        nextRun: automation.nextRunAt || undefined,
+        triggerLabel: triggerLabels[automation.trigger] || automation.trigger,
+        scopeLabel: formatScopeLabel(automation.scope, automation.scopeValue),
+      }));
+      setAutomations(normalized);
     } catch (error) {
       console.error("Failed to fetch automations:", error);
+      setAutomations([]);
+      toast.error(error instanceof Error ? error.message : "Failed to load automations");
     } finally {
       setIsLoadingAutomations(false);
     }
@@ -323,8 +408,9 @@ export function AutomationPageContent() {
     };
   }, [selectedAutomationId]);
 
-  // Check prerequisites before allowing automation creation
+  // Check prerequisites and permission before allowing automation creation
   const handleCreateAutomation = () => {
+    if (!canManageAutomations) return;
     if (!prerequisites?.hasClients || !prerequisites?.hasActiveProjects) {
       setShowPrerequisitesDialog(true);
       return;
@@ -369,17 +455,65 @@ export function AutomationPageContent() {
     setTemplateEditorOpen(true);
   };
 
-  // Handle add & customize click from recipes
+  // Map recipe ID to backend trigger (same as in handleWizardComplete)
+  const recipeTriggerMap: Record<string, string> = {
+    "notion-invoice-draft": "MILESTONE_DUE",
+    "slack-overdue-nudge": "INVOICE_OVERDUE",
+    "notion-milestone-tracking": "MILESTONE_DUE",
+    "slack-invoice-command": "INVOICE_OVERDUE",
+  };
+
+  // Handle add & customize click from recipes: edit existing if one exists for this trigger (most recently updated)
   const handleAddCustomize = (recipeId: string) => {
+    if (!canManageAutomations) return;
     const recipe = MOCK_RECIPES.find((r) => r.id === recipeId);
-    setSelectedRecipe(recipe);
-    setWizardOpen(true);
+    const trigger = recipeTriggerMap[recipeId];
+    const existing = trigger
+      ? [...automations]
+          .filter((a) => a.trigger === trigger)
+          .sort(
+            (a, b) =>
+              new Date((b as { updatedAt?: string }).updatedAt ?? 0).getTime() -
+              new Date((a as { updatedAt?: string }).updatedAt ?? 0).getTime()
+          )[0]
+      : undefined;
+
+    if (existing) {
+      setSelectedRecipe(recipe ?? undefined);
+      setEditingConfig(mapBackendToFrontend(existing));
+      setWizardOpen(true);
+      toast.info("Opening your existing automation to edit.");
+    } else {
+      setSelectedRecipe(recipe ?? undefined);
+      setEditingConfig(null);
+      setWizardOpen(true);
+    }
   };
 
   const handlePreviewRecipe = (recipeId: string) => {
+    if (!canManageAutomations) return;
     const recipe = MOCK_RECIPES.find((r) => r.id === recipeId);
-    setSelectedRecipe(recipe);
-    setWizardOpen(true);
+    const trigger = recipeTriggerMap[recipeId];
+    const existing = trigger
+      ? [...automations]
+          .filter((a) => a.trigger === trigger)
+          .sort(
+            (a, b) =>
+              new Date((b as { updatedAt?: string }).updatedAt ?? 0).getTime() -
+              new Date((a as { updatedAt?: string }).updatedAt ?? 0).getTime()
+          )[0]
+      : undefined;
+
+    if (existing) {
+      setSelectedRecipe(recipe ?? undefined);
+      setEditingConfig(mapBackendToFrontend(existing));
+      setWizardOpen(true);
+      toast.info("Opening your existing automation to edit.");
+    } else {
+      setSelectedRecipe(recipe ?? undefined);
+      setEditingConfig(null);
+      setWizardOpen(true);
+    }
   };
 
   const updateAutomationStatus = async (automationId: string, nextStatus: "ACTIVE" | "PAUSED") => {
@@ -397,7 +531,8 @@ export function AutomationPageContent() {
             });
 
       if (!response.ok) {
-        toast.error("Failed to update automation");
+        const payload = await response.json().catch(() => ({}));
+        toast.error(getAutomationErrorMessage(payload, "Failed to update automation"));
         return;
       }
 
@@ -409,7 +544,7 @@ export function AutomationPageContent() {
       toast.success(message);
     } catch (error) {
       console.error("Failed to update status:", error);
-      toast.error("Failed to update status");
+      toast.error(error instanceof Error ? error.message : "Failed to update status");
     }
   };
 
@@ -424,6 +559,14 @@ export function AutomationPageContent() {
 
   // State for editing/duplicating
   const [editingConfig, setEditingConfig] = useState<any>(null);
+
+  const getAutomationErrorMessage = (payload: any, fallback: string) => {
+    if (payload?.code === "WORKSPACE_NOT_READY" || payload?.error === "No workspace found") {
+      return "Workspace is still loading. Please wait a moment and try again.";
+    }
+    if (payload?.error) return payload.error;
+    return fallback;
+  };
 
   // Helpers to map backend enums to frontend values
   const mapBackendToFrontend = (automation: any) => {
@@ -490,8 +633,8 @@ export function AutomationPageContent() {
 
       // Map recipe ID to trigger enum
       const triggerMap: Record<string, string> = {
-        "notion-invoice-draft": "NOTION_STATUS_CHANGE",
-        "slack-overdue-nudge": "SLACK_THREAD_TAG",
+        "notion-invoice-draft": "MILESTONE_DUE",
+        "slack-overdue-nudge": "INVOICE_OVERDUE",
       };
 
       // Map scope to backend enum
@@ -521,7 +664,7 @@ export function AutomationPageContent() {
 
       const createPayload = {
         ...payload,
-        trigger: triggerMap[config.recipeId] || config.trigger || "PROJECT_STARTED",
+        trigger: triggerMap[config.recipeId] ?? "INVOICE_OVERDUE",
         status: "PENDING",
       };
 
@@ -541,8 +684,10 @@ export function AutomationPageContent() {
 
       if (!response.ok) {
         const errorPayload = await response.json().catch(() => ({}));
-        const detail = errorPayload.details ? ` (${errorPayload.details})` : "";
-        toast.error(`${errorPayload.error || "Failed to save automation"}${detail}`);
+        const detail = typeof errorPayload.details === "string" ? ` (${errorPayload.details})` : "";
+        toast.error(
+          `${getAutomationErrorMessage(errorPayload, "Failed to save automation")}${detail}`
+        );
         return;
       }
 
@@ -643,9 +788,11 @@ export function AutomationPageContent() {
         channels: selectedAutomation.channels || [],
         createdBy: "You",
         createdAt: selectedAutomation.createdAt,
-        steps: isReminderAutomation
-          ? buildSteps(selectedAutomation.sequence, selectedAutomation.channels)
-          : [],
+        steps: buildStepsForTrigger(
+          selectedAutomation.trigger,
+          selectedAutomation.sequence,
+          selectedAutomation.channels
+        ),
         linkedTemplates: isReminderAutomation
           ? buildLinkedTemplates(selectedAutomation.sequence)
           : [],
@@ -654,7 +801,7 @@ export function AutomationPageContent() {
     : undefined;
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-8">
+    <div className="w-full max-w-7xl mx-auto min-w-0 px-4 sm:px-6 py-6 space-y-8">
       {/* Section 1: Autopilot Summary */}
       <AutopilotSummary
         onCreateAutomation={handleCreateAutomation}
@@ -666,28 +813,39 @@ export function AutomationPageContent() {
       {/* Section 2: Active Automations */}
       <ActiveAutomationsSection
         automations={automations}
+        canManage={canManageAutomations}
         onCreateNew={handleCreateAutomation}
         onEdit={handleEdit}
         onPause={handleToggleStatus}
         onDuplicate={handleDuplicate}
         onDelete={async (id) => {
           try {
-            await fetch(`/api/automation/rules/${id}`, { method: "DELETE" });
+            const response = await fetch(`/api/automation/rules/${id}`, { method: "DELETE" });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({}));
+              throw new Error(getAutomationErrorMessage(payload, "Failed to delete automation"));
+            }
             await fetchAutomations();
             toast.success("Automation deleted");
           } catch (error) {
             console.error("Failed to delete automation:", error);
-            toast.error("Failed to delete");
+            toast.error(error instanceof Error ? error.message : "Failed to delete");
           }
         }}
         onViewDetails={(id) => setSelectedAutomationId(id)}
       />
 
+      <RecurringPlansSection />
+
       <AutomationSuggestions />
 
       <DataSourcesSection />
 
-      <RecipesSection onAddCustomize={handleAddCustomize} onPreview={handlePreviewRecipe} />
+      <RecipesSection
+        canManage={canManageAutomations}
+        onAddCustomize={handleAddCustomize}
+        onPreview={handlePreviewRecipe}
+      />
 
       <SequencesSection onEditCopy={handleEditCopy} />
 
@@ -725,12 +883,16 @@ export function AutomationPageContent() {
         onEditTemplate={handleEditTemplate}
         onDelete={async (id) => {
           try {
-            await fetch(`/api/automation/rules/${id}`, { method: "DELETE" });
+            const response = await fetch(`/api/automation/rules/${id}`, { method: "DELETE" });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({}));
+              throw new Error(getAutomationErrorMessage(payload, "Failed to delete automation"));
+            }
             await fetchAutomations();
             toast.success("Automation deleted");
           } catch (error) {
             console.error("Failed to delete automation:", error);
-            toast.error("Failed to delete");
+            toast.error(error instanceof Error ? error.message : "Failed to delete");
           }
         }}
       />

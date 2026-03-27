@@ -151,20 +151,32 @@ export function AiProjectWizard({
       const result = await res.json();
       const extract = result.extract;
 
-      // Handle new 'projects' array or legacy 'project' object
-      const extractedProjects = extract.projects || (extract.project ? [extract.project] : []);
+      // Handle new 'projects' array, legacy 'project' object, or flat legacy 'name'
+      const extractedProjects =
+        extract.projects ||
+        (extract.project ? [extract.project] : []) ||
+        (extract.name ? [extract] : []);
 
-      if (extractedProjects.length === 0) {
-        throw new Error("No project details found in extraction");
+      const mainProject = extractedProjects[0] || {
+        name: "New Project",
+        description: "",
+        type: "FIXED",
+        billingStrategy: "SINGLE_INVOICE",
+        totalBudget: 0,
+        currency: "INR",
+        milestones: [],
+      };
+
+      if (extractedProjects.length === 0 && !extract.client?.name) {
+        toast.error("No project or client details found in extraction.");
+        return;
       }
 
-      if (extractedProjects.length > 1) {
-        toast.message(`Found ${extractedProjects.length} projects`, {
-          description: "We've loaded the first one. Multi-project selection coming soon.",
+      if (extractedProjects.length === 0 && extract.client?.name) {
+        toast.message("Partial details found", {
+          description: "Found client info but no project details. You can enter them manually.",
         });
       }
-
-      const mainProject = extractedProjects[0];
 
       // Transform API response to state shape (adding defaults if missing)
       setData({
@@ -331,7 +343,10 @@ export function AiProjectWizard({
           body: JSON.stringify(clientPayload),
         });
 
-        if (!clientRes.ok) throw new Error("Failed to create client");
+        if (!clientRes.ok) {
+          const errData = await clientRes.json().catch(() => ({}));
+          throw new Error(errData.error || "Failed to create client");
+        }
         const clientData = await clientRes.json();
         clientId = clientData.client.id;
       }
@@ -360,10 +375,10 @@ export function AiProjectWizard({
             expectedDate: m.expectedDate,
             dueDate: m.dueDate,
             billingTrigger: m.billingTrigger,
-            status: m.status,
             autoInvoiceEnabled: true,
             autoRemindersEnabled: true,
           })),
+          sourceDocument: data.sourceDocument,
         }),
       });
 

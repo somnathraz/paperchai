@@ -1,0 +1,10 @@
+{
+  "regions": ["bom1"],
+  "crons": [
+    { "path": "/api/internal/automation/run", "schedule": "*/10 * * * *" },
+    { "path": "/api/internal/scheduled-invoices/run", "schedule": "*/5 * * * *" },
+    { "path": "/api/internal/reminders/run", "schedule": "*/15 * * * *" },
+    { "path": "/api/internal/approvals/escalate", "schedule": "0 * * * *" },
+    { "path": "/api/internal/recurring-invoices/run", "schedule": "*/15 * * * *" }
+  ]
+}

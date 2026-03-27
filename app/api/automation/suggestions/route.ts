@@ -41,6 +41,15 @@ export async function GET() {
       take: 10,
     });
 
+    // Fetch existing settings to intelligently filter suggestions
+    const existingReminderSettings = await prisma.reminderSettings.findUnique({
+      where: { workspaceId: workspace.id },
+    });
+
+    const activeSchedules = await prisma.invoiceReminderSchedule.count({
+      where: { workspaceId: workspace.id, enabled: true },
+    });
+
     const suggestions = [];
 
     // Suggestion 1: Enable auto-reminders for milestone projects
@@ -58,7 +67,12 @@ export async function GET() {
     }
 
     // Suggestion 2: Set up reminders for sent invoices
-    if (sentInvoices.length > 0) {
+    // Only suggest if:
+    // 1. There are sent invoices
+    // 2. Reminder settings are NOT enabled globally OR no specific schedules exist
+    const remindersAreSetUp = existingReminderSettings?.enabled || activeSchedules > 0;
+
+    if (sentInvoices.length > 0 && !remindersAreSetUp) {
       suggestions.push({
         id: "setup-invoice-reminders",
         title: `${sentInvoices.length} Invoice${sentInvoices.length > 1 ? "s" : ""} Could Use Reminders`,

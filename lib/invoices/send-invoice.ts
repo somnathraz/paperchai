@@ -2,12 +2,16 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { getThemeHtml } from "@/lib/email-themes";
 import { replaceTemplateVariables, TemplateVars } from "@/lib/reminders";
+import { generateInvoicePdf } from "./pdf-generation";
+import { uploadInvoicePdf } from "@/lib/r2";
+import { buildAppUrl } from "@/lib/app-url";
 
 type SendInvoiceEmailOptions = {
   invoiceId: string;
   workspaceId: string;
   channel?: "email" | "whatsapp" | "both";
   notes?: string;
+  recipientEmail?: string;
   sendMeta?: Record<string, any>;
   approvedBy?: string;
 };
@@ -17,6 +21,7 @@ export async function sendInvoiceEmail({
   workspaceId,
   channel = "email",
   notes,
+  recipientEmail,
   sendMeta,
   approvedBy,
 }: SendInvoiceEmailOptions) {
@@ -34,7 +39,9 @@ export async function sendInvoiceEmail({
     throw new Error("Invoice not found");
   }
 
-  if (!invoice.client?.email) {
+  const resolvedRecipientEmail = recipientEmail?.trim() || invoice.client?.email || undefined;
+
+  if (!resolvedRecipientEmail) {
     throw new Error("Client email not found. Please add client email before sending.");
   }
 
@@ -69,7 +76,7 @@ export async function sendInvoiceEmail({
     amount: formattedAmount,
     dueDate: formattedDueDate,
     companyName: invoice.workspace.name || "Your Company",
-    paymentLink: `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/pay/${invoice.id}`,
+    paymentLink: invoice.paymentLinkUrl || buildAppUrl(`/pay/${invoice.id}`),
   };
 
   let emailSubject: string;
@@ -110,11 +117,38 @@ Best regards,
     ...templateVars,
   });
 
+  // Generate PDF and Upload to R2
+  let attachments: any[] | undefined = undefined;
+  let pdfKey: string | undefined = undefined;
+
+  try {
+    const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
+    const host = process.env.NEXTAUTH_URL
+      ? new URL(process.env.NEXTAUTH_URL).host
+      : "localhost:3000";
+    const baseUrl = `${protocol}://${host}`;
+
+    const pdfBuffer = await generateInvoicePdf(invoice.id, baseUrl);
+    pdfKey = await uploadInvoicePdf(invoice.id, pdfBuffer);
+
+    attachments = [
+      {
+        filename: `invoice-${invoice.number || invoice.id}.pdf`,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ];
+  } catch (pdfError) {
+    console.error("Failed to generate or upload PDF:", pdfError);
+    // Continue without attachment if PDF fails (optional behavior, could also throw)
+  }
+
   const emailSent = await sendEmail({
-    to: invoice.client.email,
+    to: resolvedRecipientEmail,
     subject: emailSubject,
     html: themedHtml,
     from: invoice.workspace.registeredEmail || undefined,
+    attachments,
   });
 
   if (!emailSent) {
@@ -147,9 +181,11 @@ Best regards,
     where: { id: invoice.id },
     data: {
       status: "sent",
+      scheduledSendAt: null,
       lastSentAt: new Date(),
       deliveryChannel: channel,
       sendMeta: nextSendMeta,
+      pdfKey: pdfKey || invoice.pdfKey,
     },
   });
 
@@ -170,7 +206,7 @@ Best regards,
 
   return {
     invoice: updatedInvoice,
-    sentTo: invoice.client.email,
+    sentTo: resolvedRecipientEmail,
     templateUsed: emailTemplate?.slug || "default",
   };
 }

@@ -146,7 +146,7 @@ export async function GET(req: Request) {
     const missedSchedules = await prisma.invoice.findMany({
       where: {
         workspaceId,
-        status: "draft",
+        status: "scheduled",
         scheduledSendAt: { lt: new Date() },
       },
       include: { client: { select: { name: true } } },
@@ -184,9 +184,9 @@ export async function GET(req: Request) {
       pipeline: {
         draft: getCount("draft"),
         scheduled: await prisma.invoice.count({
-          where: { workspaceId, status: "draft", scheduledSendAt: { not: null } },
+          where: { workspaceId, status: "scheduled" },
         }),
-        sent: getCount("sent") - reminder1Count - reminder2Count,
+        sent: Math.max(getCount("sent") - reminder1Count - reminder2Count, 0),
         reminder1: reminder1Count,
         reminder2: reminder2Count,
         overdue: getCount("overdue"),
@@ -196,7 +196,7 @@ export async function GET(req: Request) {
         invoiceId: inv.id,
         invoiceNumber: inv.number,
         clientName: inv.client.name,
-        action: inv.status === "draft" ? "Scheduled Send" : "Payment Reminder",
+        action: inv.status === "scheduled" ? "Scheduled Send" : "Payment Reminder",
         scheduledAt: inv.scheduledSendAt || inv.dueDate,
       })),
       recentlyCompleted: recentlyCompleted.map((inv) => ({

@@ -1,15 +1,39 @@
 "use client";
 
 import { memo } from "react";
-import { Database, MessageSquare, Sparkles, ArrowRight, Zap, Loader2 } from "lucide-react";
+import { Database, MessageSquare, Sparkles, ArrowRight, Zap, Loader2, Unplug } from "lucide-react";
 import { useAutomation } from "../hooks/useAutomation";
 import { NotionImportPanel } from "./NotionImportPanel";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 
 export const IntegrationRecommendations = memo(function IntegrationRecommendations() {
-  const { integrationStatus, isLoading } = useAutomation();
+  const { integrationStatus, isLoading, refreshData } = useAutomation();
 
   const notionConnected = integrationStatus?.integrations?.notion?.connected ?? false;
   const slackConnected = integrationStatus?.integrations?.slack?.connected ?? false;
+  const canManageIntegrations = integrationStatus?.canManageIntegrations ?? false;
+
+  const disconnectIntegration = async (provider: "notion" | "slack") => {
+    if (!canManageIntegrations) return;
+    // eslint-disable-next-line no-alert -- confirm is intentional for connect
+    const confirmed = window.confirm(
+      `Disconnect ${provider === "notion" ? "Notion" : "Slack"} from this workspace?`
+    );
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`/api/integrations/${provider}/disconnect`, { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || `Failed to disconnect ${provider}`);
+      }
+      toast.success(payload?.message || `${provider} disconnected`);
+      refreshData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to disconnect");
+    }
+  };
 
   // Loading state
   if (isLoading && !integrationStatus) {
@@ -37,6 +61,18 @@ export const IntegrationRecommendations = memo(function IntegrationRecommendatio
               <p className="text-sm text-stone-600 dark:text-stone-400 mb-3">
                 Browse your Notion databases and import data into PaperChai
               </p>
+              {canManageIntegrations && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => disconnectIntegration("notion")}
+                  className="mt-1 border-rose-200 text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                >
+                  <Unplug className="mr-1 h-4 w-4" />
+                  Disconnect Notion
+                </Button>
+              )}
             </div>
           </div>
 
@@ -73,12 +109,18 @@ export const IntegrationRecommendations = memo(function IntegrationRecommendatio
                 <li>• Get real-time notifications</li>
                 <li>• Use slash commands</li>
               </ul>
-              <a
-                href="/api/integrations/slack/oauth/authorize?next=/automation"
-                className="block w-full px-3 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors text-center"
-              >
-                Connect Slack
-              </a>
+              {canManageIntegrations ? (
+                <a
+                  href="/api/integrations/slack/oauth/authorize?next=/automation"
+                  className="block w-full px-3 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors text-center"
+                >
+                  Connect Slack
+                </a>
+              ) : (
+                <div className="block w-full px-3 py-2 bg-stone-200 dark:bg-stone-800 text-stone-500 rounded-lg text-sm font-medium text-center">
+                  Owner/Admin required
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -106,6 +148,18 @@ export const IntegrationRecommendations = memo(function IntegrationRecommendatio
               Manage Integrations
               <ArrowRight className="w-4 h-4" />
             </a>
+            {canManageIntegrations && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => disconnectIntegration("slack")}
+                className="mt-2 w-full sm:w-auto border-rose-200 text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/30"
+              >
+                <Unplug className="mr-1 h-4 w-4" />
+                Disconnect Slack
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -145,12 +199,18 @@ export const IntegrationRecommendations = memo(function IntegrationRecommendatio
               <li>• Extract milestones from agreements</li>
               <li>• Draft invoices from pages</li>
             </ul>
-            <a
-              href="/api/integrations/notion/oauth/authorize?next=/automation"
-              className="block w-full px-3 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors text-center"
-            >
-              Connect Notion
-            </a>
+            {canManageIntegrations ? (
+              <a
+                href="/api/integrations/notion/oauth/authorize?next=/automation"
+                className="block w-full px-3 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors text-center"
+              >
+                Connect Notion
+              </a>
+            ) : (
+              <div className="block w-full px-3 py-2 bg-stone-200 dark:bg-stone-800 text-stone-500 rounded-lg text-sm font-medium text-center">
+                Owner/Admin required
+              </div>
+            )}
           </div>
         )}
 
@@ -171,12 +231,18 @@ export const IntegrationRecommendations = memo(function IntegrationRecommendatio
               <li>• Get real-time notifications</li>
               <li>• Use slash commands</li>
             </ul>
-            <a
-              href="/api/integrations/slack/oauth/authorize?next=/automation"
-              className="block w-full px-3 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors text-center"
-            >
-              Connect Slack
-            </a>
+            {canManageIntegrations ? (
+              <a
+                href="/api/integrations/slack/oauth/authorize?next=/automation"
+                className="block w-full px-3 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors text-center"
+              >
+                Connect Slack
+              </a>
+            ) : (
+              <div className="block w-full px-3 py-2 bg-stone-200 dark:bg-stone-800 text-stone-500 rounded-lg text-sm font-medium text-center">
+                Owner/Admin required
+              </div>
+            )}
           </div>
         )}
       </div>

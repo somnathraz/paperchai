@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth"; // Assuming authOptions is exported from here, verify path
-import { prisma } from "@/lib/prisma"; // Assuming prisma client is here
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { startOfDay, endOfDay, addDays } from "date-fns";
 
@@ -20,81 +20,77 @@ export async function GET(req: Request) {
     }
 
     const workspaceId = workspace.id;
-    const todayStart = startOfDay(new Date());
-    const todayEnd = endOfDay(new Date());
-    const nextWeek = addDays(new Date(), 45); // Extended to support calendar view
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const todayEnd = endOfDay(now);
+    const nextWindow = addDays(now, 45);
 
-    // 1. Fetch Today's Queue
-    // Logic: Invoices that are scheduled to be sent today OR are DUE today/recently and haven't been paid.
-    // Also including invoices with 'scheduledSendAt' in the past but status is still 'draft' (missed?)
-    const queue = await prisma.invoice.findMany({
+    // 1. Fetch today's reminder queue from reminder steps (source of truth)
+    const queueSteps = await prisma.invoiceReminderStep.findMany({
       where: {
-        workspaceId,
-        status: { in: ["draft", "sent", "overdue"] },
-        OR: [
-          // Scheduled for today
-          {
-            scheduledSendAt: {
-              gte: todayStart,
-              lte: todayEnd,
-            },
+        schedule: {
+          workspaceId,
+          enabled: true,
+          invoice: {
+            remindersEnabled: true,
+            status: { notIn: ["paid", "cancelled"] },
           },
-          // OR Due today (for reminders)
-          {
-            dueDate: {
-              gte: todayStart,
-              lte: todayEnd,
-            },
-          },
-        ],
+        },
+        sendAt: { gte: todayStart, lte: todayEnd },
+        status: { in: ["PENDING", "PROCESSING", "FAILED", "SENT"] },
       },
       include: {
-        client: {
-          select: { name: true },
+        schedule: {
+          include: {
+            invoice: {
+              select: {
+                id: true,
+                number: true,
+                status: true,
+                client: { select: { name: true } },
+              },
+            },
+          },
         },
       },
-      orderBy: {
-        scheduledSendAt: "asc",
-      },
-      take: 10,
+      orderBy: [{ sendAt: "asc" }, { index: "asc" }],
+      take: 50,
     });
 
-    // 2. Fetch Upcoming Reminders (Next 45 days) - Include ALL invoices for calendar view
-    const upcoming = await prisma.invoice.findMany({
+    // 2. Fetch upcoming reminder steps for calendar view (next 45 days)
+    const upcomingSteps = await prisma.invoiceReminderStep.findMany({
       where: {
-        workspaceId,
-        OR: [
-          // Invoices with due dates in the range
-          {
-            dueDate: {
-              gte: todayStart,
-              lte: nextWeek,
-            },
+        schedule: {
+          workspaceId,
+          enabled: true,
+          invoice: {
+            remindersEnabled: true,
+            status: { notIn: ["paid", "cancelled"] },
           },
-          // Invoices with scheduled send dates in the range
-          {
-            scheduledSendAt: {
-              gte: todayStart,
-              lte: nextWeek,
-            },
-          },
-          // Recently sent invoices (last 7 days)
-          {
-            lastSentAt: {
-              gte: addDays(new Date(), -7),
-              lte: new Date(),
-            },
-          },
-        ],
+        },
+        sendAt: { gte: todayStart, lte: nextWindow },
+        status: { in: ["PENDING", "PROCESSING", "FAILED"] },
       },
       include: {
-        client: { select: { name: true } },
+        schedule: {
+          include: {
+            invoice: {
+              select: {
+                id: true,
+                number: true,
+                status: true,
+                total: true,
+                client: { select: { name: true } },
+              },
+            },
+          },
+        },
       },
-      orderBy: { dueDate: "asc" },
-      take: 100,
+      orderBy: [{ sendAt: "asc" }, { index: "asc" }],
+      take: 500,
     });
 
-    // 3. Reminder Health Stats (from ReminderHistory)
+    // 3. Reminder Health Stats (from ReminderHistory, last 30d)
     const stats = await prisma.reminderHistory.groupBy({
       by: ["status"],
       where: {
@@ -113,82 +109,96 @@ export async function GET(req: Request) {
     const totalCount = sentCount + failedCount;
     const deliveryRate = totalCount > 0 ? Math.round((sentCount / totalCount) * 100) : 100;
 
-    // 4. Fetch Failures (Missed Schedules + Failed Sends)
-    const missedInvoices = await prisma.invoice.findMany({
+    // 4. Fetch failures from actual reminder step failures
+    const failedSteps = await prisma.invoiceReminderStep.findMany({
       where: {
-        workspaceId,
-        status: "draft",
-        scheduledSendAt: { lt: new Date() },
+        status: "FAILED",
+        schedule: {
+          workspaceId,
+        },
       },
-      take: 5,
-      include: { client: { select: { name: true } } },
-    });
-
-    const failedHistory = await prisma.reminderHistory.findMany({
-      where: {
-        workspaceId,
-        status: "failed",
-      },
-      take: 5,
-      orderBy: { createdAt: "desc" },
       include: {
-        client: { select: { name: true } },
-        invoice: { select: { number: true } },
+        schedule: {
+          include: {
+            invoice: {
+              select: {
+                id: true,
+                number: true,
+                client: { select: { name: true } },
+              },
+            },
+          },
+        },
       },
+      orderBy: { updatedAt: "desc" },
+      take: 10,
     });
 
-    const failures = [
-      ...missedInvoices.map((inv) => ({
-        id: inv.id,
-        title: `Invoice #${inv.number} - Missed`,
-        reason: "Scheduled time passed without sending",
-        client: inv.client.name,
-        type: "missed_schedule",
-      })),
-      ...failedHistory.map((hist) => ({
-        id: hist.id,
-        title: `Invoice #${hist.invoice?.number || "Unknown"} - Failed`,
-        reason: "Delivery failed (Check logs)", // Placeholder as no error col
-        client: hist.client?.name || "Unknown",
-        type: "delivery_failed",
-      })),
-    ].slice(0, 5);
+    const failures = failedSteps.map((step) => ({
+      id: step.id,
+      stepId: step.id,
+      invoiceId: step.schedule.invoice.id,
+      invoiceNumber: step.schedule.invoice.number || step.schedule.invoice.id,
+      title: `Invoice #${step.schedule.invoice.number || "Unknown"} - Failed`,
+      reason: step.lastError || "Reminder delivery failed",
+      client: step.schedule.invoice.client?.name || "Unknown",
+      type: "delivery_failed",
+      status: step.status.toLowerCase(),
+      occurredAt: step.updatedAt,
+    }));
+
+    const upcomingByDate = new Map<
+      string,
+      {
+        date: string;
+        invoices: Array<{
+          id: string;
+          invoiceId: string;
+          client: string;
+          amount: number;
+          status: string;
+          stepId: string;
+        }>;
+      }
+    >();
+    for (const step of upcomingSteps) {
+      const iso = step.sendAt.toISOString();
+      const key = iso.slice(0, 10);
+      const bucket = upcomingByDate.get(key) || { date: iso, invoices: [] };
+      bucket.invoices.push({
+        id: step.schedule.invoice.number || step.schedule.invoice.id,
+        invoiceId: step.schedule.invoice.id,
+        client: step.schedule.invoice.client.name,
+        amount: Number(step.schedule.invoice.total),
+        status: step.status.toLowerCase(),
+        stepId: step.id,
+      });
+      upcomingByDate.set(key, bucket);
+    }
 
     return NextResponse.json({
-      queue: queue.map((inv) => ({
-        id: inv.number || inv.id, // Display ID
-        invoiceId: inv.id, // Actual ID for API calls
-        client: inv.client.name,
-        type: inv.status === "draft" ? "Scheduled Send" : "Payment Reminder",
-        channel: inv.deliveryChannel || "email",
-        status:
-          inv.scheduledSendAt && inv.scheduledSendAt < new Date() && inv.status === "draft"
-            ? "failed"
-            : "pending",
-        time: inv.scheduledSendAt
-          ? new Date(inv.scheduledSendAt).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : "All Day",
-        rawStatus: inv.status,
+      queue: queueSteps.map((step) => ({
+        id: step.id,
+        stepId: step.id,
+        invoiceId: step.schedule.invoice.id,
+        invoiceNumber: step.schedule.invoice.number || step.schedule.invoice.id,
+        client: step.schedule.invoice.client.name,
+        type:
+          step.daysBeforeDue && step.daysBeforeDue > 0
+            ? `${step.daysBeforeDue}d before due`
+            : step.daysAfterDue && step.daysAfterDue > 0
+              ? `${step.daysAfterDue}d after due`
+              : "Due date reminder",
+        channel: "email",
+        status: step.status.toLowerCase(),
+        time: step.sendAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        sendAt: step.sendAt.toISOString(),
       })),
-      upcoming: upcoming.map((inv) => ({
-        date: inv.dueDate || inv.scheduledSendAt || inv.lastSentAt || new Date(),
-        invoices: [
-          {
-            id: inv.number || inv.id,
-            invoiceId: inv.id, // Actual ID for API calls
-            client: inv.client.name,
-            amount: Number(inv.total),
-            status: inv.status,
-          },
-        ],
-      })),
+      upcoming: Array.from(upcomingByDate.values()).sort((a, b) => a.date.localeCompare(b.date)),
       health: {
         deliveryRate,
         failedCount,
-        openRate: 68, // distinct read tracking not in schema yet, hardcoding or using approximate
+        openRate: null,
       },
       failures,
     });

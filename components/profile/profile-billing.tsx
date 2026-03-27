@@ -1,5 +1,11 @@
 export function ProfileBilling() {
-  const features = ["Unlimited clients", "Smart reminders", "Reliability scoring", "Monthly recap PDF", "Agreement gists"];
+  const features = [
+    "Plan-based invoice and client limits",
+    "Smart reminders and automation on paid tiers",
+    "Slack and Notion integrations",
+    "AI extraction and invoice drafting",
+    "Workspace billing lives in Settings",
+  ];
 
   return (
     <section className="space-y-3">
@@ -10,10 +16,14 @@ export function ProfileBilling() {
       <div className="space-y-3 rounded-2xl border border-white/15 bg-white/70 p-4 shadow-inner">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-semibold text-foreground">Pro · ₹149 / month</p>
-            <p className="text-xs text-muted-foreground">Next billing: Jan 19, 2025</p>
+            <p className="text-sm font-semibold text-foreground">Workspace plan</p>
+            <p className="text-xs text-muted-foreground">
+              View the active plan and limits in Billing settings.
+            </p>
           </div>
-          <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary">Active</span>
+          <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary">
+            Managed in settings
+          </span>
         </div>
         <ul className="space-y-2 text-sm text-muted-foreground">
           {features.map((feature) => (

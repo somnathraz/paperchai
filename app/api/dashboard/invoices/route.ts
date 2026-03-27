@@ -26,6 +26,11 @@ export async function GET() {
 
     const recentInvoices = invoices.map((inv) => {
       const due = inv.dueDate ? new Date(inv.dueDate) : null;
+      const total = Number(inv.total || 0);
+      const amountPaid = Number(inv.amountPaid || 0);
+      const balanceDue = Math.max(0, total - amountPaid);
+      const isPartialPaid =
+        amountPaid > 0 && balanceDue > 0 && ["sent", "scheduled", "overdue"].includes(inv.status);
       let dueLabel = "—";
       if (due) {
         const diff = Math.floor((due.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
@@ -62,14 +67,20 @@ export async function GET() {
         status: statusMap[inv.status] || inv.status,
         due: dueLabel,
         channel: channels.length ? channels : ["Email"],
+        amountPaid,
+        balanceDue,
         displayStatus:
           inv.status === "paid"
             ? "Paid"
-            : inv.status === "overdue"
-              ? "Overdue"
-              : inv.status === "sent"
-                ? "Sent"
-                : "Draft",
+            : isPartialPaid
+              ? "Partial Paid"
+              : inv.status === "overdue"
+                ? "Overdue"
+                : inv.status === "sent"
+                  ? "Sent"
+                  : inv.status === "scheduled"
+                    ? "Scheduled"
+                    : "Draft",
       };
     });
 

@@ -2,7 +2,17 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Mail, Shield, Users, Clock3, RefreshCw, AlertTriangle, UserPlus, MoreHorizontal } from "lucide-react";
+import {
+  Mail,
+  Shield,
+  Users,
+  Clock3,
+  RefreshCw,
+  AlertTriangle,
+  UserPlus,
+  MoreHorizontal,
+} from "lucide-react";
+import { toast } from "sonner";
 
 type Member = {
   id: string;
@@ -31,15 +41,26 @@ type WorkspaceMembersPanelProps = {
   isOwner: boolean;
 };
 
-const ROLE_OPTIONS = ["owner", "admin", "finance", "client-manager", "reminder-only", "viewer"];
+const ROLE_OPTIONS = ["OWNER", "ADMIN", "MEMBER", "VIEWER"] as const;
 
-export function WorkspaceMembersPanel({ members, invites, plan, maxMembersLabel, isOwner }: WorkspaceMembersPanelProps) {
+export function WorkspaceMembersPanel({
+  members,
+  invites,
+  plan,
+  maxMembersLabel,
+  isOwner,
+}: WorkspaceMembersPanelProps) {
   const activeMembers = members.filter((m) => m.status === "active").length;
   const pendingInvites = invites.filter((invite) => invite.status === "pending").length;
 
   return (
     <div className="space-y-6">
-      <SummaryCards activeMembers={activeMembers} pendingInvites={pendingInvites} plan={plan} maxMembersLabel={maxMembersLabel} />
+      <SummaryCards
+        activeMembers={activeMembers}
+        pendingInvites={pendingInvites}
+        plan={plan}
+        maxMembersLabel={maxMembersLabel}
+      />
       <MemberCard members={members} invites={invites} isOwner={isOwner} />
       <RoleMatrix />
       <ActivityLog members={members} invites={invites} />
@@ -47,17 +68,34 @@ export function WorkspaceMembersPanel({ members, invites, plan, maxMembersLabel,
   );
 }
 
-function SummaryCards({ activeMembers, pendingInvites, plan, maxMembersLabel }: { activeMembers: number; pendingInvites: number; plan: string; maxMembersLabel: string }) {
+function SummaryCards({
+  activeMembers,
+  pendingInvites,
+  plan,
+  maxMembersLabel,
+}: {
+  activeMembers: number;
+  pendingInvites: number;
+  plan: string;
+  maxMembersLabel: string;
+}) {
   const cards = [
     { label: "Members", value: activeMembers.toString(), description: "Active teammates" },
-    { label: "Pending invites", value: pendingInvites.toString(), description: "Awaiting acceptance" },
+    {
+      label: "Pending invites",
+      value: pendingInvites.toString(),
+      description: "Awaiting acceptance",
+    },
     { label: "Plan", value: plan, description: maxMembersLabel },
   ];
 
   return (
     <div className="grid gap-4 sm:grid-cols-3">
       {cards.map((card) => (
-        <div key={card.label} className="rounded-2xl border border-white/20 bg-white/70 p-4 shadow-[0_18px_60px_-40px_rgba(0,0,0,0.45)]">
+        <div
+          key={card.label}
+          className="rounded-2xl border border-white/20 bg-white/70 p-4 shadow-[0_18px_60px_-40px_rgba(0,0,0,0.45)]"
+        >
           <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">{card.label}</p>
           <p className="mt-2 text-2xl font-semibold text-foreground">{card.value}</p>
           <p className="text-xs text-muted-foreground">{card.description}</p>
@@ -67,28 +105,48 @@ function SummaryCards({ activeMembers, pendingInvites, plan, maxMembersLabel }: 
   );
 }
 
-function MemberCard({ members, invites, isOwner }: { members: Member[]; invites: Invite[]; isOwner: boolean }) {
+function MemberCard({
+  members,
+  invites,
+  isOwner,
+}: {
+  members: Member[];
+  invites: Invite[];
+  isOwner: boolean;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   const updateRole = (memberId: string, role: string) => {
     startTransition(async () => {
-      await fetch("/api/workspace/members/role", {
+      const res = await fetch("/api/workspace/members/role", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ memberId, role }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Failed to update role");
+        return;
+      }
+      toast.success("Role updated");
       router.refresh();
     });
   };
 
   const removeMember = (memberId?: string, inviteId?: string) => {
     startTransition(async () => {
-      await fetch("/api/workspace/members/remove", {
+      const res = await fetch("/api/workspace/members/remove", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ memberId, inviteId }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Failed to remove");
+        return;
+      }
+      toast.success(memberId ? "Member removed" : "Invite cancelled");
       router.refresh();
     });
   };
@@ -98,7 +156,9 @@ function MemberCard({ members, invites, isOwner }: { members: Member[]; invites:
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Members</p>
-          <p className="text-sm text-muted-foreground">Invite teammates, change roles, and manage access.</p>
+          <p className="text-sm text-muted-foreground">
+            Invite teammates, change roles, and manage access.
+          </p>
         </div>
         {isOwner && <InviteMemberButton />}
       </div>
@@ -158,7 +218,11 @@ function MemberCard({ members, invites, isOwner }: { members: Member[]; invites:
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {member.status === "active" ? "Active" : member.status}
-                    {member.twoFactor && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-700">2FA</span>}
+                    {member.twoFactor && (
+                      <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-700">
+                        2FA
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{member.lastActive}</td>
                   <td className="px-4 py-3 text-right">
@@ -181,18 +245,27 @@ function MemberCard({ members, invites, isOwner }: { members: Member[]; invites:
 
       {invites.length > 0 && (
         <div className="rounded-2xl border border-border/60 bg-white/80 p-4">
-          <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Pending invites</p>
+          <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+            Pending invites
+          </p>
           <div className="mt-3 space-y-2 text-sm">
             {invites.map((invite) => (
-              <div key={invite.id} className="flex items-center justify-between rounded-xl border border-border/50 bg-white px-3 py-2">
+              <div
+                key={invite.id}
+                className="flex items-center justify-between rounded-xl border border-border/50 bg-white px-3 py-2"
+              >
                 <div>
                   <p className="font-semibold text-foreground">{invite.email}</p>
                   <p className="text-xs text-muted-foreground">
-                    {toTitleCase(invite.role)} • Invited {new Date(invite.createdAt).toLocaleDateString()}
+                    {toTitleCase(invite.role)} • Invited{" "}
+                    {new Date(invite.createdAt).toLocaleDateString()}
                   </p>
                 </div>
                 {isOwner && (
-                  <button className="text-xs font-semibold text-red-600 hover:underline" onClick={() => removeMember(undefined, invite.id)}>
+                  <button
+                    className="text-xs font-semibold text-red-600 hover:underline"
+                    onClick={() => removeMember(undefined, invite.id)}
+                  >
                     Cancel
                   </button>
                 )}
@@ -209,32 +282,38 @@ function InviteMemberButton() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState("finance");
+  const [role, setRole] = useState<(typeof ROLE_OPTIONS)[number]>("MEMBER");
   const [isSubmitting, startTransition] = useTransition();
 
   const submit = () => {
     startTransition(async () => {
-      await fetch("/api/workspace/members/invite", {
+      const res = await fetch("/api/workspace/members/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, role }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Could not send invite");
+        return;
+      }
       setEmail("");
-      setRole("finance");
+      setRole("MEMBER");
       setOpen(false);
+      toast.success("Invite sent");
       router.refresh();
     });
   };
 
   if (!open) {
     return (
-    <button
-      onClick={() => setOpen(true)}
-      className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-primary via-emerald-500 to-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
-    >
-      <UserPlus className="h-4 w-4" />
-      Invite member
-    </button>
+      <button
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-primary via-emerald-500 to-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+      >
+        <UserPlus className="h-4 w-4" />
+        Invite member
+      </button>
     );
   }
 
@@ -244,11 +323,20 @@ function InviteMemberButton() {
       <div className="mt-3 space-y-3 text-sm">
         <div>
           <label className="text-xs font-semibold text-muted-foreground">Email</label>
-          <input value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full rounded-2xl border border-border/70 px-3 py-2 text-sm outline-none" placeholder="teammate@studio.com" />
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="mt-1 w-full rounded-2xl border border-border/70 px-3 py-2 text-sm outline-none"
+            placeholder="teammate@studio.com"
+          />
         </div>
         <div>
           <label className="text-xs font-semibold text-muted-foreground">Role</label>
-          <select value={role} onChange={(e) => setRole(e.target.value)} className="mt-1 w-full rounded-2xl border border-border/70 px-3 py-2 text-sm outline-none">
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as (typeof ROLE_OPTIONS)[number])}
+            className="mt-1 w-full rounded-2xl border border-border/70 px-3 py-2 text-sm outline-none"
+          >
             {ROLE_OPTIONS.map((r) => (
               <option value={r} key={r}>
                 {toTitleCase(r)}
@@ -265,7 +353,11 @@ function InviteMemberButton() {
           >
             {isSubmitting ? "Sending..." : "Send invite"}
           </button>
-          <button type="button" className="rounded-full border border-border/70 px-3 py-2 text-xs font-semibold text-muted-foreground" onClick={() => setOpen(false)}>
+          <button
+            type="button"
+            className="rounded-full border border-border/70 px-3 py-2 text-xs font-semibold text-muted-foreground"
+            onClick={() => setOpen(false)}
+          >
             Cancel
           </button>
         </div>
@@ -276,16 +368,58 @@ function InviteMemberButton() {
 
 function RoleMatrix() {
   const rows = [
-    { permission: "Invoices", owner: "Full", admin: "Full", finance: "Full", client: "View", reminder: "—", viewer: "View" },
-    { permission: "Clients", owner: "Full", admin: "Full", finance: "Edit", client: "Edit", reminder: "—", viewer: "View" },
-    { permission: "Reminders", owner: "Full", admin: "Full", finance: "Full", client: "—", reminder: "Send", viewer: "View" },
-    { permission: "Automation", owner: "Full", admin: "Full", finance: "—", client: "—", reminder: "—", viewer: "—" },
-    { permission: "Billing", owner: "Full", admin: "View", finance: "—", client: "—", reminder: "—", viewer: "—" },
+    {
+      permission: "Invoices",
+      owner: "Full",
+      admin: "Full",
+      finance: "Full",
+      client: "View",
+      reminder: "—",
+      viewer: "View",
+    },
+    {
+      permission: "Clients",
+      owner: "Full",
+      admin: "Full",
+      finance: "Edit",
+      client: "Edit",
+      reminder: "—",
+      viewer: "View",
+    },
+    {
+      permission: "Reminders",
+      owner: "Full",
+      admin: "Full",
+      finance: "Full",
+      client: "—",
+      reminder: "Send",
+      viewer: "View",
+    },
+    {
+      permission: "Automation",
+      owner: "Full",
+      admin: "Full",
+      finance: "—",
+      client: "—",
+      reminder: "—",
+      viewer: "—",
+    },
+    {
+      permission: "Billing",
+      owner: "Full",
+      admin: "View",
+      finance: "—",
+      client: "—",
+      reminder: "—",
+      viewer: "—",
+    },
   ];
 
   return (
     <div className="space-y-3 rounded-3xl border border-white/20 bg-white/80 p-6 shadow-[0_32px_140px_-80px_rgba(0,0,0,0.5)]">
-      <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Roles & permissions</p>
+      <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+        Roles & permissions
+      </p>
       <div className="overflow-x-auto rounded-2xl border border-border/60">
         <table className="min-w-full text-xs">
           <thead className="bg-muted/60 text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -302,7 +436,9 @@ function RoleMatrix() {
           <tbody>
             {rows.map((row) => (
               <tr key={row.permission} className="border-t border-border/40 bg-white/90">
-                <td className="px-4 py-3 text-sm font-semibold text-foreground">{row.permission}</td>
+                <td className="px-4 py-3 text-sm font-semibold text-foreground">
+                  {row.permission}
+                </td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">{row.owner}</td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">{row.admin}</td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">{row.finance}</td>
@@ -333,7 +469,9 @@ function ActivityLog({ members, invites }: { members: Member[]; invites: Invite[
 
   return (
     <div className="space-y-3 rounded-3xl border border-white/20 bg-white/80 p-6 shadow-[0_32px_140px_-80px_rgba(0,0,0,0.5)]">
-      <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Workspace activity</p>
+      <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+        Workspace activity
+      </p>
       <div className="space-y-2 text-sm text-muted-foreground">
         {logs.map((log) => (
           <div key={log.id} className="flex items-center gap-2">

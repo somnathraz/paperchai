@@ -1,4 +1,3 @@
-
 /**
  * Reminder Slice
  */
@@ -10,10 +9,15 @@ export interface ReminderState {
   queue: any[];
   upcoming: any[];
   failures: any[]; // Add failures
+  filters: {
+    statuses: string[];
+    clients: string[];
+    channels: string[];
+  };
   health: {
     deliveryRate: number;
     failedCount: number;
-    openRate: number;
+    openRate: number | null;
   } | null;
   activeTab: string;
   isLoading: boolean;
@@ -25,6 +29,11 @@ const initialState: ReminderState = {
   queue: [],
   upcoming: [],
   failures: [], // Init failures
+  filters: {
+    statuses: [],
+    clients: [],
+    channels: [],
+  },
   health: null,
   activeTab: "queue",
   isLoading: false,
@@ -56,7 +65,7 @@ export const sendReminder = createAsyncThunk(
       if (response.error) {
         return rejectWithValue(response.error);
       }
-      return { invoiceId, status: 'sent', channel };
+      return { invoiceId, status: "sent", channel };
     } catch (error: any) {
       return rejectWithValue(error.message || "Failed to send reminder");
     }
@@ -73,12 +82,29 @@ const reminderSlice = createSlice({
     clearError(state) {
       state.error = null;
     },
-    updateQueueItemStatus(state, action: PayloadAction<{ id: string, status: string }>) {
-      const item = state.queue.find(i => i.invoiceId === action.payload.id);
+    setFilters(
+      state,
+      action: PayloadAction<{ statuses?: string[]; clients?: string[]; channels?: string[] }>
+    ) {
+      if (action.payload.statuses) {
+        state.filters.statuses = action.payload.statuses;
+      }
+      if (action.payload.clients) {
+        state.filters.clients = action.payload.clients;
+      }
+      if (action.payload.channels) {
+        state.filters.channels = action.payload.channels;
+      }
+    },
+    resetFilters(state) {
+      state.filters = { statuses: [], clients: [], channels: [] };
+    },
+    updateQueueItemStatus(state, action: PayloadAction<{ id: string; status: string }>) {
+      const item = state.queue.find((i) => i.invoiceId === action.payload.id);
       if (item) {
         item.status = action.payload.status;
       }
-    }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -102,13 +128,14 @@ const reminderSlice = createSlice({
       })
       // Send Reminder (Optimistic Update)
       .addCase(sendReminder.fulfilled, (state, action) => {
-        const item = state.queue.find(i => i.invoiceId === action.payload.invoiceId);
+        const item = state.queue.find((i) => i.invoiceId === action.payload.invoiceId);
         if (item) {
-          item.status = 'sent';
+          item.status = "sent";
         }
       });
-  }
+  },
 });
 
-export const { setActiveTab, clearError, updateQueueItemStatus } = reminderSlice.actions;
+export const { setActiveTab, clearError, setFilters, resetFilters, updateQueueItemStatus } =
+  reminderSlice.actions;
 export default reminderSlice.reducer;

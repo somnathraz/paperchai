@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import puppeteer from "puppeteer";
 import { headers } from "next/headers";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
+import { generateInvoicePdf } from "@/lib/invoices/pdf-generation";
+import { ensureActiveWorkspace } from "@/lib/workspace";
+import { prisma } from "@/lib/prisma";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // 1. Check Auth
@@ -12,71 +14,39 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  // 2. Rate limiting - 5 PDFs per minute per user (Puppeteer is resource-intensive)
+  const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+  if (!workspace) {
+    return new NextResponse("Workspace not found", { status: 404 });
+  }
+
+  // 2. Rate limiting
   const rateCheck = await checkRateLimitByProfile(req, "pdfGenerate", session.user.id);
   if (!rateCheck.allowed) {
     return new NextResponse("Too many PDF requests. Please wait a moment.", { status: 429 });
   }
 
-  // 2. Extract Invoice ID from URL (since this is an API route in app dir, we need to parse it cleanly)
-  // The route is /api/invoices/[id]/pdf, so the ID is in params if we put it in the right folder.
-  // Actually, I'm writing this to `app/api/invoices/[id]/pdf/route.ts` so `params` is available in arguments.
-
-  // 3. Get Session Cookie to share with Puppeteer
+  const { id } = await params;
+  const invoice = await prisma.invoice.findFirst({
+    where: { id, workspaceId: workspace.id },
+    select: { id: true },
+  });
+  if (!invoice) {
+    return new NextResponse("Invoice not found", { status: 404 });
+  }
   const headersList = await headers();
   const cookieHeader = headersList.get("cookie");
 
   try {
-    // 4. Launch Puppeteer
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
-
-    const page = await browser.newPage();
-
-    // 5. Set Cookies for Auth
-    // Puppeteer needs domain, name, value. We can just set the extra HTTP headers?
-    // Setting individual cookies is safer.
-    // However, parsing the cookie string is annoying.
-    // Easier: Set generic headers.
-    await page.setExtraHTTPHeaders({
-      cookie: cookieHeader || "",
-    });
-
-    // 6. Navigate to PDF View Page
-    // Determine base URL dynamically or fallback to localhost
     const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
     const host = headersList.get("host") || "localhost:3000";
     const baseUrl = `${protocol}://${host}`;
 
-    const { id } = await params;
-    const invoiceId = id;
+    const pdfBuffer = await generateInvoicePdf(id, baseUrl, cookieHeader || undefined);
 
-    // Note: 'networkidle0' ensures fonts and styles are loaded
-    await page.goto(`${baseUrl}/invoices/${invoiceId}/pdf-view`, {
-      waitUntil: "networkidle0",
-    });
-
-    // 7. Generate PDF
-    const pdf = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      margin: {
-        top: "0px",
-        right: "0px",
-        bottom: "0px",
-        left: "0px",
-      },
-    });
-
-    await browser.close();
-
-    // 8. Return PDF
-    return new NextResponse(Buffer.from(pdf), {
+    return new NextResponse(pdfBuffer as any, {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="invoice-${invoiceId}.pdf"`,
+        "Content-Disposition": `attachment; filename="invoice-${id}.pdf"`,
       },
     });
   } catch (error) {

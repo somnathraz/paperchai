@@ -31,19 +31,8 @@ CREATE TYPE "SlackImportType" AS ENUM ('THREAD_SUMMARY', 'SLASH_COMMAND', 'MESSA
 -- CreateEnum
 CREATE TYPE "ImportStatus" AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED');
 
--- AlterEnum
--- This migration adds more than one value to an enum.
--- With PostgreSQL versions 11 and earlier, this is not possible
--- in a single migration. This can be worked around by creating
--- multiple migrations, each migration adding only one value to
--- the enum.
-
-
-ALTER TYPE "ProjectStatus" ADD VALUE 'PLANNING';
-ALTER TYPE "ProjectStatus" ADD VALUE 'ACTIVE';
-ALTER TYPE "ProjectStatus" ADD VALUE 'ON_HOLD';
-ALTER TYPE "ProjectStatus" ADD VALUE 'COMPLETED';
-ALTER TYPE "ProjectStatus" ADD VALUE 'CANCELLED';
+-- ProjectStatus enum values added in 20251213171600_add_project_status_enum_values
+-- (must be in separate transaction before using them here).
 
 -- AlterTable
 ALTER TABLE "Invoice" ADD COLUMN     "remindersEnabled" BOOLEAN NOT NULL DEFAULT false;

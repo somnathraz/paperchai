@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 
 interface PendingAutomation {
   id: string;
@@ -46,13 +47,15 @@ export function PendingAutomationsDialog({
     setIsLoading(true);
     try {
       const response = await fetch("/api/automation/rules");
-      if (response.ok) {
-        const data = await response.json();
-        const pending = data.automations?.filter((a: any) => a.status === "PENDING") || [];
-        setPendingAutomations(pending);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load pending automations");
       }
+      const pending = data.automations?.filter((a: any) => a.status === "PENDING") || [];
+      setPendingAutomations(pending);
     } catch (error) {
       console.error("Failed to fetch pending automations:", error);
+      setPendingAutomations([]);
     } finally {
       setIsLoading(false);
     }
@@ -65,18 +68,20 @@ export function PendingAutomationsDialog({
         method: "POST",
       });
 
-      if (response.ok) {
-        // Remove from pending list
-        setPendingAutomations((prev) => prev.filter((a) => a.id !== automationId));
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to approve automation");
+      }
 
-        // If no more pending, close and notify parent
-        if (pendingAutomations.length === 1) {
-          onApproved?.();
-          onClose();
-        }
+      setPendingAutomations((prev) => prev.filter((a) => a.id !== automationId));
+
+      if (pendingAutomations.length === 1) {
+        onApproved?.();
+        onClose();
       }
     } catch (error) {
       console.error("Failed to approve automation:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to approve automation");
     } finally {
       setApproving(null);
     }
@@ -84,9 +89,13 @@ export function PendingAutomationsDialog({
 
   const handleReject = async (automationId: string) => {
     try {
-      await fetch(`/api/automation/rules/${automationId}`, {
+      const response = await fetch(`/api/automation/rules/${automationId}`, {
         method: "DELETE",
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to reject automation");
+      }
       setPendingAutomations((prev) => prev.filter((a) => a.id !== automationId));
 
       if (pendingAutomations.length === 1) {
@@ -94,6 +103,7 @@ export function PendingAutomationsDialog({
       }
     } catch (error) {
       console.error("Failed to reject automation:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to reject automation");
     }
   };
 

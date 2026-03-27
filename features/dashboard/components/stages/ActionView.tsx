@@ -151,7 +151,7 @@ export async function ActionView({ state, userId }: Props) {
                   className="text-red-600 hover:text-red-700 hover:bg-red-50"
                   asChild
                 >
-                  <Link href={`/invoices/${inv.id}/remind`}>Send Reminder</Link>
+                  <Link href={`/invoices/new?id=${inv.id}`}>Open Invoice</Link>
                 </Button>
               </div>
             </div>

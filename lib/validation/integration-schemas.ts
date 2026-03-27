@@ -18,11 +18,11 @@ export const slackOAuthCallbackSchema = z.object({
 export const slackCommandSchema = z.object({
   team_id: z.string().regex(/^T[A-Z0-9]+$/),
   team_domain: z.string().optional(),
-  channel_id: z.string().regex(/^C[A-Z0-9]+$/),
+  channel_id: z.string().regex(/^[CGD][A-Z0-9]+$/),
   channel_name: z.string().optional(),
   user_id: z.string().regex(/^U[A-Z0-9]+$/),
   user_name: z.string().optional(),
-  command: z.string().startsWith("/"),
+  command: z.literal("/invoice"),
   text: z.string().max(3000),
   response_url: z.string().url(),
   trigger_id: z.string().optional(),

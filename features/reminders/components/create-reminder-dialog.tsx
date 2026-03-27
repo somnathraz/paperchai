@@ -61,7 +61,7 @@ export function CreateReminderDialog() {
   >([]);
 
   // Form state
-  const [selectedClient, setSelectedClient] = useState<string>("");
+  const [selectedClient, setSelectedClient] = useState<string>("all");
   const [selectedInvoice, setSelectedInvoice] = useState<string>("");
 
   useEffect(() => {
@@ -124,9 +124,10 @@ export function CreateReminderDialog() {
     }
   };
 
-  const filteredInvoices = selectedClient
-    ? invoices.filter((inv) => inv.clientId === selectedClient)
-    : invoices;
+  const filteredInvoices =
+    selectedClient && selectedClient !== "all"
+      ? invoices.filter((inv) => inv.clientId === selectedClient)
+      : invoices;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

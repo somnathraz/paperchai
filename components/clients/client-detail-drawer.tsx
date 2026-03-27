@@ -259,7 +259,7 @@ export function ClientDetailDrawer({
 
               <TabsContent value="overview" className="mt-4 space-y-4">
                 <ClientDetail
-                  client={client}
+                  client={displayClient}
                   userName={userName}
                   userEmail={userEmail}
                   onNewProject={handleNewProject}
@@ -295,7 +295,7 @@ export function ClientDetailDrawer({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {client?.projects?.length > 0 ? (
+                        {displayClient?.projects?.length > 0 ? (
                           displayClient.projects.map((project: any) => (
                             <TableRow key={project.id}>
                               <TableCell>
