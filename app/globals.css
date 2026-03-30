@@ -98,19 +98,23 @@
   .sheen {
     background-size: 200% 200%;
     animation: gradientShift 18s ease-in-out infinite;
+    will-change: background-position;
   }
 
   .bar-animate {
     background-size: 200% 100%;
     animation: gradientShift 10s ease-in-out infinite;
+    will-change: background-position;
   }
 
   .float-slow {
     animation: float 10s ease-in-out infinite;
+    will-change: transform;
   }
 
   .pulse-soft {
     animation: pulseGlow 14s ease-in-out infinite;
+    will-change: opacity, filter;
   }
 
   .grid-hero {
@@ -186,7 +190,6 @@
 
 /* Print Styles for Invoice Templates */
 @media print {
-
   /* Remove all shadows and rounded corners for print */
   * {
     box-shadow: none !important;

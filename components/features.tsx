@@ -74,32 +74,35 @@ export function Features({ className }: FeaturesProps) {
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            transition={{ delay: idx * 0.08, duration: 0.45 }}
-            whileHover={{ scale: 1.015, y: -4 }}
+            transition={{ delay: idx * 0.08, duration: 0.45, ease: "easeOut" }}
+            whileHover={{ scale: 1.01, y: -2 }}
             className={cn(
               "relative group rounded-2xl p-7 overflow-hidden",
               "border border-white/20 bg-white/55 backdrop-blur-xl",
-              "shadow-[0_8px_40px_rgba(0,0,0,0.06)] hover:shadow-[0_16px_48px_rgba(0,0,0,0.12)]",
-              "transition-all"
+              "shadow-[0_8px_40px_rgba(0,0,0,0.06)]",
+              "transition-all duration-300 ease-out"
             )}
+            style={{ willChange: "transform" }}
           >
-            {/* Hover Glow */}
-            <div
+            {/* Hover Glow - Fixed to prevent weird animations */}
+            <motion.div
               className={cn(
-                "absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity",
-                "bg-gradient-to-br blur-2xl pointer-events-none",
+                "absolute inset-0 bg-gradient-to-br blur-2xl pointer-events-none",
                 item.glow
               )}
+              initial={{ opacity: 0 }}
+              whileHover={{ opacity: 0.3 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
             />
 
             {/* Icon Container */}
             <div className="relative mb-3 flex h-14 w-14 items-center justify-center rounded-xl border border-white/30 bg-white/70 backdrop-blur-xl shadow-lg">
-              <item.icon className="h-7 w-7 text-primary relative" strokeWidth={2.3} />
+              <item.icon className="h-7 w-7 text-primary relative z-10" strokeWidth={2.3} />
             </div>
 
             {/* Title + Description */}
-            <h3 className="text-lg font-semibold">{item.title}</h3>
-            <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+            <h3 className="text-lg font-semibold relative z-10">{item.title}</h3>
+            <p className="mt-2 text-sm text-muted-foreground leading-relaxed relative z-10">
               {item.description}
             </p>
           </motion.div>

@@ -106,7 +106,7 @@ export const IntegrationRecommendations = memo(function IntegrationRecommendatio
                             <li>• Draft invoices from pages</li>
                         </ul>
                         <a
-                            href="/api/integrations/notion/oauth/authorize"
+                            href="/api/integrations/notion/oauth/authorize?next=/automation"
                             className="block w-full px-3 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors text-center"
                         >
                             Connect Notion
@@ -132,7 +132,7 @@ export const IntegrationRecommendations = memo(function IntegrationRecommendatio
                             <li>• Use slash commands</li>
                         </ul>
                         <a
-                            href="/api/integrations/slack/oauth/authorize"
+                            href="/api/integrations/slack/oauth/authorize?next=/automation"
                             className="block w-full px-3 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors text-center"
                         >
                             Connect Slack

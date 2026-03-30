@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, memo } from "react";
 import { ArrowLeft, Save, Clock, Send, Download, Sparkles } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
@@ -25,17 +25,27 @@ type EditorHeaderProps = {
   invoiceId?: string;
   templateName: string;
   onSaveDraft: () => void;
-  onSchedule: (opts: { invoiceId?: string; when: string; channel: "email" | "whatsapp" | "both" }) => void;
+  onSchedule: (opts: {
+    invoiceId?: string;
+    when: string;
+    channel: "email" | "whatsapp" | "both";
+  }) => void;
   onSend: (opts: { invoiceId?: string; channel: "email" | "whatsapp" | "both" }) => void;
   onOpenSendModal?: () => void;
   onAIReview?: () => void;
   aiReviewIssueCount?: number;
   invoiceStatus?: string;
   lastSentAt?: string;
+  canSchedule?: boolean;
+  scheduleDisabledReason?: string;
+  canSend?: boolean;
+  sendDisabledReason?: string;
   hasAutomation?: boolean;
+  approvalStatus?: "PENDING" | "APPROVED" | "REJECTED";
+  onApproveAutomation?: () => void;
 };
 
-export function EditorHeader({
+export const EditorHeader = memo(function EditorHeader({
   invoiceId,
   templateName,
   onSaveDraft,
@@ -44,9 +54,15 @@ export function EditorHeader({
   onOpenSendModal,
   invoiceStatus,
   lastSentAt,
+  canSchedule = true,
+  scheduleDisabledReason,
+  canSend = true,
+  sendDisabledReason,
   hasAutomation,
   onAIReview,
   aiReviewIssueCount,
+  approvalStatus,
+  onApproveAutomation,
 }: EditorHeaderProps) {
   const [scheduleDate, setScheduleDate] = useState<Date | undefined>(undefined);
   const [scheduleTime, setScheduleTime] = useState("");
@@ -54,7 +70,9 @@ export function EditorHeader({
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const isSentToday = lastSentAt && new Date(lastSentAt).toDateString() === new Date().toDateString();
+  const isSentToday =
+    lastSentAt && new Date(lastSentAt).toDateString() === new Date().toDateString();
+  const isSendDisabled = !!isSentToday || !canSend;
 
   const handleDownloadPdf = async () => {
     if (!invoiceId) return;
@@ -75,7 +93,8 @@ export function EditorHeader({
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error("PDF download error:", error);
-      alert("Failed to download PDF. Please try again.");
+      // alert("Failed to download PDF. Please try again.");
+      // TODO: Replace with toast notification
     } finally {
       setIsDownloading(false);
     }
@@ -94,16 +113,39 @@ export function EditorHeader({
         <div className="h-4 w-px bg-border/60" />
         <span className="text-sm font-medium text-muted-foreground">Template: {templateName}</span>
         {invoiceStatus && (
-          <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${invoiceStatus === "sent" ? "bg-blue-100 text-blue-700" :
-            invoiceStatus === "draft" ? "bg-slate-100 text-slate-700" :
-              "bg-gray-100 text-gray-700"
-            }`}>
+          <span
+            className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${
+              invoiceStatus === "sent"
+                ? "bg-blue-100 text-blue-700"
+                : invoiceStatus === "draft"
+                  ? "bg-slate-100 text-slate-700"
+                  : "bg-gray-100 text-gray-700"
+            }`}
+          >
             {invoiceStatus}
+          </span>
+        )}
+        {approvalStatus === "PENDING" && (
+          <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+            Approval required
+          </span>
+        )}
+        {approvalStatus === "REJECTED" && (
+          <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+            Approval rejected
           </span>
         )}
       </div>
 
       <div className="flex items-center gap-2">
+        {approvalStatus === "PENDING" && onApproveAutomation && (
+          <button
+            onClick={onApproveAutomation}
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition hover:border-amber-300 hover:bg-amber-100"
+          >
+            Approve automation
+          </button>
+        )}
         <button
           onClick={handleDownloadPdf}
           disabled={isDownloading || !invoiceId}
@@ -135,18 +177,33 @@ export function EditorHeader({
           </button>
         )}
         <button
-          onClick={() => setShowScheduleModal(true)}
+          onClick={() => canSchedule && setShowScheduleModal(true)}
+          disabled={!canSchedule}
+          title={
+            canSchedule ? "Schedule invoice" : scheduleDisabledReason || "Scheduling unavailable"
+          }
           className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-white px-4 py-2 text-sm font-medium text-foreground transition hover:border-primary/40 hover:text-primary"
         >
           <Clock className="h-4 w-4" />
           Schedule
         </button>
         <button
-          onClick={() => onOpenSendModal ? onOpenSendModal() : onSend({ channel })}
-          className={`inline-flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] transition hover:shadow-[0_6px_16px_rgba(16,185,129,0.4)] ${isSentToday ? "bg-slate-400 cursor-not-allowed shadow-none" : "bg-gradient-to-r from-primary via-emerald-500 to-primary"
-            }`}
-          disabled={!!isSentToday}
-          title={isSentToday ? "Invoice already sent today" : hasAutomation ? "Automation configured" : "Send immediately"}
+          onClick={() => (onOpenSendModal ? onOpenSendModal() : onSend({ channel }))}
+          className={`inline-flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] transition hover:shadow-[0_6px_16px_rgba(16,185,129,0.4)] ${
+            isSentToday
+              ? "bg-slate-400 cursor-not-allowed shadow-none"
+              : "bg-gradient-to-r from-primary via-emerald-500 to-primary"
+          }`}
+          disabled={isSendDisabled}
+          title={
+            isSentToday
+              ? "Invoice already sent today"
+              : !canSend
+                ? sendDisabledReason || "Sending unavailable"
+                : hasAutomation
+                  ? "Automation configured"
+                  : "Send immediately"
+          }
         >
           {isSentToday ? (
             <>
@@ -172,15 +229,16 @@ export function EditorHeader({
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>Schedule Invoice</DialogTitle>
-            <DialogDescription>
-              Choose when and how to send this invoice.
-            </DialogDescription>
+            <DialogDescription>Choose when and how to send this invoice.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Delivery Channel</label>
-              <Select value={channel} onValueChange={(v: "email" | "whatsapp" | "both") => setChannel(v)}>
+              <Select
+                value={channel}
+                onValueChange={(v: "email" | "whatsapp" | "both") => setChannel(v)}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -206,7 +264,9 @@ export function EditorHeader({
               <Input
                 type="time"
                 value={scheduleTime}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setScheduleTime(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setScheduleTime(e.target.value)
+                }
                 placeholder="Select time"
               />
             </div>
@@ -225,7 +285,7 @@ export function EditorHeader({
             </button>
             <button
               onClick={() => {
-                if (!scheduleDate) return;
+                if (!scheduleDate || !canSchedule) return;
                 // Combine date and time into ISO string
                 const dateTime = new Date(scheduleDate);
                 if (scheduleTime) {
@@ -237,7 +297,7 @@ export function EditorHeader({
                 setScheduleDate(undefined);
                 setScheduleTime("");
               }}
-              disabled={!scheduleDate}
+              disabled={!scheduleDate || !canSchedule}
               className="inline-flex items-center justify-center rounded-lg bg-gradient-to-r from-primary via-emerald-500 to-primary px-5 py-2 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] transition hover:shadow-[0_6px_16px_rgba(16,185,129,0.4)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Schedule Invoice
@@ -247,4 +307,4 @@ export function EditorHeader({
       </Dialog>
     </div>
   );
-}
+});

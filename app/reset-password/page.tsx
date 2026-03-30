@@ -1,10 +1,13 @@
 "use client";
 
 export const dynamic = "force-dynamic";
-import { useEffect, useState } from "react";
+
+import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Lock, ShieldCheck } from "lucide-react";
+import { Lock, ShieldCheck, Loader2 } from "lucide-react";
+import { useAuth } from "@/features/auth/hooks";
+import { validatePassword, validatePasswordMatch } from "@/features/auth/utils";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { AuthHeader } from "@/components/auth/AuthHeader";
@@ -17,61 +20,65 @@ const quickFacts = [
   { label: "Reminders", value: "Email + WhatsApp" },
 ];
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get("token") || "";
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  // Use Redux auth state
+  const { resetPassword, isLoading, error, status, clearError, clearStatus } = useAuth();
 
   useEffect(() => {
     if (!token) {
-      setError("Invalid reset link. Request a new one.");
+      setLocalError("Invalid reset link. Request a new one.");
     }
   }, [token]);
 
-  const handleReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setStatus(null);
-    if (!token) {
-      setError("Reset link is missing.");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-    if (password !== confirm) {
-      setError("Passwords must match.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, password }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || "Could not reset password.");
-      } else {
-        setStatus("Password updated. You can now sign in.");
+  // Memoized validations
+  const passwordValidation = useMemo(() => validatePassword(password), [password]);
+  const passwordMatchValidation = useMemo(() => validatePasswordMatch(password, confirm), [password, confirm]);
+  const canSubmit = useMemo(
+    () => token && passwordValidation.valid && passwordMatchValidation.valid,
+    [token, passwordValidation, passwordMatchValidation]
+  );
+
+  // useCallback for stable reference
+  const handleReset = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      clearError();
+      clearStatus();
+      setLocalError(null);
+
+      if (!token) {
+        setLocalError("Reset link is missing.");
+        return;
+      }
+      if (!passwordValidation.valid) {
+        setLocalError(passwordValidation.error || "Invalid password");
+        return;
+      }
+      if (!passwordMatchValidation.valid) {
+        setLocalError(passwordMatchValidation.error || "Passwords must match");
+        return;
+      }
+
+      const result = await resetPassword(token, password);
+
+      if (!result.type.includes("rejected")) {
         setPassword("");
         setConfirm("");
         setTimeout(() => router.push("/login"), 1200);
       }
-    } catch {
-      setError("Could not reset password.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [token, password, passwordValidation, passwordMatchValidation, resetPassword, clearError, clearStatus, router]
+  );
+
+  const displayError = localError || error;
 
   return (
     <AuthLayout
@@ -90,7 +97,7 @@ export default function ResetPasswordPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
-            disabled={loading}
+            disabled={isLoading}
           />
           <InputField
             label="Confirm password"
@@ -99,12 +106,12 @@ export default function ResetPasswordPage() {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             placeholder="••••••••"
-            disabled={loading}
+            disabled={isLoading}
           />
 
-          {error && (
+          {displayError && (
             <div className="rounded-2xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
+              {displayError}
             </div>
           )}
           {status && (
@@ -113,8 +120,8 @@ export default function ResetPasswordPage() {
             </div>
           )}
 
-          <PrimaryButton type="submit" icon={<ShieldCheck className="h-4 w-4" />} disabled={loading}>
-            {loading ? "Updating..." : "Update password"}
+          <PrimaryButton type="submit" icon={<ShieldCheck className="h-4 w-4" />} disabled={isLoading || !canSubmit}>
+            {isLoading ? "Updating..." : "Update password"}
           </PrimaryButton>
         </form>
 
@@ -126,5 +133,17 @@ export default function ResetPasswordPage() {
         </p>
       </AuthCard>
     </AuthLayout>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-screen w-full items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    }>
+      <ResetPasswordContent />
+    </Suspense>
   );
 }

@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { Mail, RefreshCw } from "lucide-react";
+import { useAuth } from "@/features/auth/hooks";
+import { validateEmail } from "@/features/auth/utils";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { AuthHeader } from "@/components/auth/AuthHeader";
@@ -17,47 +19,39 @@ const quickFacts = [
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
-  const handleRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setStatus(null);
-    if (!email.trim()) {
-      setError("Enter your email.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await fetch("/api/auth/request-reset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || "Could not send reset link.");
-      } else {
-        setStatus(data.resetUrl ? `Reset link (dev): ${data.resetUrl}` : data.message);
+  // Use Redux auth state instead of local state
+  const { forgotPassword, isLoading, error, status, clearError, clearStatus } = useAuth();
+
+  // Memoized validation
+  const isEmailValid = useMemo(() => validateEmail(email), [email]);
+  const canSubmit = useMemo(() => isEmailValid, [isEmailValid]);
+
+  // useCallback for stable reference
+  const handleRequest = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      clearError();
+      clearStatus();
+
+      if (!isEmailValid) {
+        return;
       }
-    } catch {
-      setError("Could not send reset link.");
-    } finally {
-      setLoading(false);
-    }
-  };
+
+      await forgotPassword(email);
+    },
+    [email, isEmailValid, forgotPassword, clearError, clearStatus]
+  );
 
   return (
     <AuthLayout
       badgeText="PaperChai · Reset access"
       title="Reset your password and get paid without friction."
-      subtitle="We’ll email you a secure link to reset your password. Links expire after 1 hour."
+      subtitle="We'll email you a secure link to reset your password. Links expire after 1 hour."
       quickFacts={quickFacts}
     >
       <AuthCard>
-        <AuthHeader title="Reset access" subtitle="We’ll send a secure link" />
+        <AuthHeader title="Reset access" subtitle="We'll send a secure link" />
         <form className="space-y-4" onSubmit={handleRequest}>
           <InputField
             label="Email"
@@ -66,7 +60,7 @@ export default function ForgotPasswordPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@paperchai.com"
-            disabled={loading}
+            disabled={isLoading}
           />
 
           {error && (
@@ -80,8 +74,8 @@ export default function ForgotPasswordPage() {
             </div>
           )}
 
-          <PrimaryButton type="submit" icon={<RefreshCw className="h-4 w-4" />} disabled={loading}>
-            {loading ? "Sending..." : "Send reset link"}
+          <PrimaryButton type="submit" icon={<RefreshCw className="h-4 w-4" />} disabled={isLoading || !canSubmit}>
+            {isLoading ? "Sending..." : "Send reset link"}
           </PrimaryButton>
         </form>
 

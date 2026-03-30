@@ -1,7 +1,15 @@
 "use client";
 
 import { useMemo, memo } from "react";
-import { FileText, TabletSmartphone, MonitorSmartphone, ZoomIn, ZoomOut, Sun, Moon } from "lucide-react";
+import {
+  FileText,
+  TabletSmartphone,
+  MonitorSmartphone,
+  ZoomIn,
+  ZoomOut,
+  Sun,
+  Moon,
+} from "lucide-react";
 import { renderTemplate } from "../templates/registry";
 import { InvoiceFormState } from "../invoice-form";
 import { cn } from "@/lib/utils";
@@ -67,16 +75,19 @@ export const CanvasPreview = memo(function CanvasPreview({
       selectedClient.city,
       selectedClient.state,
       selectedClient.postalCode,
-      selectedClient.country
+      selectedClient.country,
     ].filter(Boolean);
     return parts.join(", ");
   };
 
   const visibilityMap =
-    sections?.reduce((acc: Record<string, boolean>, curr: { id: string; visible?: boolean }) => {
-      acc[curr.id] = curr.visible ?? true;
-      return acc;
-    }, {} as Record<string, boolean>) || undefined;
+    sections?.reduce(
+      (acc: Record<string, boolean>, curr: { id: string; visible?: boolean }) => {
+        acc[curr.id] = curr.visible ?? true;
+        return acc;
+      },
+      {} as Record<string, boolean>
+    ) || undefined;
 
   const totals = useMemo(() => {
     const taxSettings = formState.taxSettings || { inclusive: false, defaultRate: 0 };
@@ -120,7 +131,7 @@ export const CanvasPreview = memo(function CanvasPreview({
         }, 0) || 0;
 
     const total = isInclusive
-      ? subtotal + tax - discountTotal + feeTotal  // For inclusive, subtotal already excludes tax
+      ? subtotal + tax - discountTotal + feeTotal // For inclusive, subtotal already excludes tax
       : subtotal + tax - discountTotal + feeTotal;
 
     return { subtotal, tax, discountTotal, feeTotal, total };
@@ -142,7 +153,11 @@ export const CanvasPreview = memo(function CanvasPreview({
     gradientTo: formState.gradientTo,
     layoutDensity: formState.layoutDensity,
     showBorder: formState.showBorder,
-    clientName: selectedClient ? selectedClient.name : (formState.clientId ? "Selected client" : "Client Name"),
+    clientName: selectedClient
+      ? selectedClient.name
+      : formState.clientId
+        ? "Selected client"
+        : "Client Name",
     clientEmail: selectedClient?.email || "",
     clientPhone: selectedClient?.phone || "",
     clientCompany: selectedClient?.company || "",
@@ -160,6 +175,10 @@ export const CanvasPreview = memo(function CanvasPreview({
     fee: totals.feeTotal ? `₹${totals.feeTotal.toLocaleString()}` : undefined,
     notes: formState.notes,
     paymentTerms: formState.terms,
+    paymentMethod: formState.paymentMethod,
+    paymentInstructions: formState.paymentInstructions,
+    paymentLinkUrl: formState.paymentLinkUrl,
+    allowPartialPayments: formState.allowPartialPayments,
     reminderCadence: formState.reminderCadence,
     signatureUrl: formState.signatureUrl,
     items: formState.items.map((item: any) => ({
@@ -202,6 +221,9 @@ export const CanvasPreview = memo(function CanvasPreview({
     }
     if (visibilityMap.payment === false) {
       mockData.paymentTerms = "";
+      mockData.paymentMethod = "";
+      mockData.paymentInstructions = "";
+      mockData.paymentLinkUrl = "";
     }
   }
 
@@ -244,7 +266,9 @@ export const CanvasPreview = memo(function CanvasPreview({
           <div className="h-4 w-px bg-border/60" />
           <span className="text-xs font-medium text-muted-foreground">{currentTemplateName}</span>
           {(templateTags || "").toLowerCase().includes("pro") && (
-            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Pro</span>
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+              Pro
+            </span>
           )}
         </div>
 
@@ -291,7 +315,7 @@ export const CanvasPreview = memo(function CanvasPreview({
             )}
             style={getPreviewDimensions()}
           >
-            <div className="h-full w-full" style={{ minHeight: '100%', minWidth: '100%' }}>
+            <div className="h-full w-full" style={{ minHeight: "100%", minWidth: "100%" }}>
               {renderTemplate(templateSlug, {
                 preview: true,
                 modalPreview: true,
@@ -320,7 +344,9 @@ export const CanvasPreview = memo(function CanvasPreview({
           onClick={() => onZoomChange(75)}
           className={cn(
             "px-2 py-1 text-xs font-medium transition w-full",
-            zoom === 75 ? "text-primary font-semibold" : "text-muted-foreground hover:text-foreground"
+            zoom === 75
+              ? "text-primary font-semibold"
+              : "text-muted-foreground hover:text-foreground"
           )}
         >
           75%
@@ -329,7 +355,9 @@ export const CanvasPreview = memo(function CanvasPreview({
           onClick={() => onZoomChange(100)}
           className={cn(
             "px-2 py-1 text-xs font-medium transition w-full",
-            zoom === 100 ? "text-primary font-semibold" : "text-muted-foreground hover:text-foreground"
+            zoom === 100
+              ? "text-primary font-semibold"
+              : "text-muted-foreground hover:text-foreground"
           )}
         >
           100%
@@ -338,7 +366,9 @@ export const CanvasPreview = memo(function CanvasPreview({
           onClick={() => onZoomChange(125)}
           className={cn(
             "px-2 py-1 text-xs font-medium transition w-full",
-            zoom === 125 ? "text-primary font-semibold" : "text-muted-foreground hover:text-foreground"
+            zoom === 125
+              ? "text-primary font-semibold"
+              : "text-muted-foreground hover:text-foreground"
           )}
         >
           125%
@@ -353,4 +383,3 @@ export const CanvasPreview = memo(function CanvasPreview({
     </div>
   );
 });
-

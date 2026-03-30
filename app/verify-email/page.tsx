@@ -1,10 +1,11 @@
 "use client";
 
 export const dynamic = "force-dynamic";
-import { useEffect, useState } from "react";
+
+import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { CheckCircle2, MailCheck, XCircle } from "lucide-react";
+import { CheckCircle2, MailCheck, XCircle, Loader2 } from "lucide-react";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { AuthHeader } from "@/components/auth/AuthHeader";
@@ -16,13 +17,23 @@ const quickFacts = [
   { label: "Reminders", value: "Email + WhatsApp" },
 ];
 
-export default function VerifyEmailPage() {
+function VerifyEmailContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get("token");
 
   const [status, setStatus] = useState<"pending" | "success" | "error">("pending");
   const [message, setMessage] = useState("Verifying your email...");
+
+  // Memoized status checks
+  const isPending = useMemo(() => status === "pending", [status]);
+  const isSuccess = useMemo(() => status === "success", [status]);
+  const isError = useMemo(() => status === "error", [status]);
+
+  // useCallback for stable reference
+  const handleGoToLogin = useCallback(() => {
+    router.push("/login");
+  }, [router]);
 
   useEffect(() => {
     const run = async () => {
@@ -32,6 +43,7 @@ export default function VerifyEmailPage() {
         return;
       }
       try {
+        // Direct API call (no Redux action needed for this one-time operation)
         const res = await fetch("/api/auth/verify-email", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -65,7 +77,7 @@ export default function VerifyEmailPage() {
         <AuthHeader title="Email verification" subtitle="Secure your workspace" />
 
         <div className="space-y-6 text-center">
-          {status === "pending" && (
+          {isPending && (
             <div className="space-y-2 text-sm text-muted-foreground">
               <div className="flex items-center justify-center gap-2">
                 <MailCheck className="h-5 w-5 text-primary" />
@@ -74,7 +86,7 @@ export default function VerifyEmailPage() {
             </div>
           )}
 
-          {status === "success" && (
+          {isSuccess && (
             <div className="space-y-2 text-sm text-emerald-700">
               <div className="flex items-center justify-center gap-2">
                 <CheckCircle2 className="h-5 w-5 text-emerald-600" />
@@ -83,7 +95,7 @@ export default function VerifyEmailPage() {
             </div>
           )}
 
-          {status === "error" && (
+          {isError && (
             <div className="space-y-2 text-sm text-destructive">
               <div className="flex items-center justify-center gap-2">
                 <XCircle className="h-5 w-5 text-destructive" />
@@ -99,7 +111,7 @@ export default function VerifyEmailPage() {
             <PrimaryButton
               type="button"
               icon={<CheckCircle2 className="h-4 w-4" />}
-              onClick={() => router.push("/login")}
+              onClick={handleGoToLogin}
             >
               Go to login
             </PrimaryButton>
@@ -110,5 +122,17 @@ export default function VerifyEmailPage() {
         </div>
       </AuthCard>
     </AuthLayout>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-screen w-full items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    }>
+      <VerifyEmailContent />
+    </Suspense>
   );
 }

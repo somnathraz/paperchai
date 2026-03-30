@@ -251,9 +251,9 @@ export function WorkspaceForm({ workspace }: WorkspaceFormProps) {
         <div className="space-y-6">
           {/* Logo Upload */}
           <WorkspaceLogoUpload
-            logo={logo}
-            onLogoChange={(newLogo) => {
-              setLogo(newLogo);
+            value={logo || ""}
+            onChange={(newLogo: string) => {
+              setLogo(newLogo || null);
               setSaved(false);
             }}
           />
@@ -290,8 +290,7 @@ export function WorkspaceForm({ workspace }: WorkspaceFormProps) {
           {/* Preview Block */}
           <WorkspacePreview
             name={formData.name}
-            businessType={formData.businessType}
-            logo={logo}
+            logo={logo || ""}
             address={`${formData.addressLine1}, ${formData.city}, ${formData.state}`}
             taxId={formData.taxGstNumber}
           />

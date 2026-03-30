@@ -353,7 +353,7 @@ export function NotionImportWizard({ onClose }: { onClose: () => void }) {
                                                     <h4 className="font-medium">Draft on Status Change</h4>
                                                     <Toggle checked={autoDraft} onChange={setAutoDraft} />
                                                 </div>
-                                                <p className="text-sm text-stone-500">Automatically draft an invoice when Notion status changes to "Ready to Bill".</p>
+                                                <p className="text-sm text-stone-500">Automatically draft an invoice when Notion status changes to &quot;Ready to Bill&quot;.</p>
                                                 <div className="mt-2 text-xs bg-amber-100 text-amber-800 inline-block px-2 py-0.5 rounded-full font-medium">Premium Feature</div>
                                             </div>
                                         </div>

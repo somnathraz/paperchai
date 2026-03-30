@@ -4,17 +4,20 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import {
     Check, ChevronDown, Lock, RefreshCw, Wand2, Info, Maximize2, Loader2, Send
 } from "lucide-react";
+import Image from "next/image";
 import { getThemeHtml } from "@/lib/email-themes";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 const THEMES = [
@@ -343,7 +346,7 @@ export function EmailTemplateEditor() {
                                     <label className="text-sm font-medium">Logo</label>
                                     <div className="flex items-center gap-4">
                                         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border bg-muted text-xs font-bold text-muted-foreground">
-                                            {logoUrl ? <img src={logoUrl} className="h-full w-full rounded-full object-cover" alt="Logo" /> : "PC"}
+                                            {logoUrl ? <Image src={logoUrl} width={64} height={64} className="h-full w-full rounded-full object-cover" alt="Logo" /> : "PC"}
                                         </div>
                                         <div className="flex-1">
                                             <label className="cursor-pointer inline-flex items-center justify-center whitespace-nowrap rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3">
@@ -506,6 +509,10 @@ export function EmailTemplateEditor() {
             {/* Full Preview Dialog */}
             <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
                 <DialogContent className="max-w-4xl p-0 overflow-hidden bg-slate-50 gap-0">
+                    <div className="sr-only">
+                        <DialogTitle>Email Template Preview</DialogTitle>
+                        <DialogDescription>Preview how your email template will appear to recipients</DialogDescription>
+                    </div>
                     <EmailPreview
                         previewHtml={previewHtml}
                         subject={renderedSubject}

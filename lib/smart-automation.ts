@@ -64,11 +64,11 @@ export async function shouldSkipMilestoneAutomation(milestoneId: string): Promis
         };
     }
 
-    // Already completed statuses
-    if (milestone.status === "PAID" || milestone.status === "COMPLETED") {
+    // Already paid status (effectively completed)
+    if (milestone.status === "PAID") {
         return {
             shouldSkip: true,
-            reason: `Already ${milestone.status.toLowerCase()}`,
+            reason: "Already paid",
             milestone: { id: milestone.id, title: milestone.title, status: milestone.status, lastManualActionAt: milestone.lastManualActionAt },
         };
     }
@@ -119,7 +119,7 @@ export async function recordMilestoneManualAction(
     } else if (actionType === "payment_received") {
         statusUpdate = "PAID";
     } else if (actionType === "marked_complete") {
-        statusUpdate = "COMPLETED";
+        statusUpdate = "PAID"; // Map to PAID as COMPLETED doesn't exist
     }
 
     return prisma.projectMilestone.update({
