@@ -1,6 +1,6 @@
 "use server";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -8,8 +8,14 @@ import { ensureActiveWorkspace } from "@/lib/workspace";
 import { sendEmail } from "@/lib/email";
 import { getThemeHtml } from "@/lib/email-themes";
 import { replaceTemplateVariables, TemplateVars } from "@/lib/reminders";
+import { checkIpRateLimit } from "@/lib/rate-limiter";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  const rl = checkIpRateLimit(req);
+  if (!rl.allowed) {
+    return NextResponse.json({ error: rl.error }, { status: 429 });
+  }
+
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -17,7 +23,14 @@ export async function POST(req: Request) {
   if (!workspace) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
 
   const body = await req.json();
-  const { invoiceId, channel = "email", templateSlug, notes, automationEnabled, reminderSettings } = body;
+  const {
+    invoiceId,
+    channel = "email",
+    templateSlug,
+    notes,
+    automationEnabled,
+    reminderSettings,
+  } = body;
 
   if (!invoiceId) {
     return NextResponse.json({ error: "invoiceId required" }, { status: 400 });
@@ -30,7 +43,7 @@ export async function POST(req: Request) {
       include: {
         client: true,
         workspace: {
-          include: { owner: true }
+          include: { owner: true },
         },
       },
     });
@@ -40,15 +53,18 @@ export async function POST(req: Request) {
     }
 
     if (!invoice.client?.email) {
-      return NextResponse.json({ error: "Client email not found. Please add client email before sending." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Client email not found. Please add client email before sending." },
+        { status: 400 }
+      );
     }
 
     // Try to get user's "invoice-send" email template or use default
     let emailTemplate = await prisma.emailTemplate.findFirst({
       where: {
         workspaceId: workspace.id,
-        slug: "invoice-send"
-      }
+        slug: "invoice-send",
+      },
     });
 
     // If no custom template, try workspace's default "initial" or "reminder-initial" template
@@ -56,16 +72,20 @@ export async function POST(req: Request) {
       emailTemplate = await prisma.emailTemplate.findFirst({
         where: {
           workspaceId: workspace.id,
-          slug: { in: ["reminder-initial", "initial"] }
-        }
+          slug: { in: ["reminder-initial", "initial"] },
+        },
       });
     }
 
     // Template variables
     const formattedAmount = `${invoice.currency} ${Number(invoice.total).toLocaleString()}`;
     const formattedDueDate = invoice.dueDate
-      ? new Date(invoice.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-      : 'Upon receipt';
+      ? new Date(invoice.dueDate).toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : "Upon receipt";
 
     const templateVars: TemplateVars = {
       clientName: invoice.client.name || "Valued Customer",
@@ -73,21 +93,21 @@ export async function POST(req: Request) {
       amount: formattedAmount,
       dueDate: formattedDueDate,
       companyName: workspace.name || "Your Company",
-      paymentLink: `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/pay/${invoice.id}`,
+      paymentLink: `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/pay/${invoice.id}`,
     };
 
     let emailSubject: string;
     let emailBody: string;
-    let brandColor = '#0f172a';
-    let theme: 'minimal' | 'classic' | 'modern' | 'noir' = 'modern';
+    let brandColor = "#0f172a";
+    let theme: "minimal" | "classic" | "modern" | "noir" = "modern";
     let logoUrl: string | undefined;
 
     if (emailTemplate) {
       // Use user's template
       emailSubject = replaceTemplateVariables(emailTemplate.subject, templateVars);
       emailBody = replaceTemplateVariables(emailTemplate.body, templateVars);
-      brandColor = emailTemplate.brandColor || '#0f172a';
-      theme = (emailTemplate.theme as typeof theme) || 'modern';
+      brandColor = emailTemplate.brandColor || "#0f172a";
+      theme = (emailTemplate.theme as typeof theme) || "modern";
       logoUrl = emailTemplate.logoUrl || undefined;
     } else {
       // Use default template
@@ -128,7 +148,10 @@ Best regards,
 
     if (!emailSent) {
       console.error("Email sending failed for invoice:", invoiceId);
-      return NextResponse.json({ error: "Failed to send email. Please check your email configuration." }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to send email. Please check your email configuration." },
+        { status: 500 }
+      );
     }
 
     // Update invoice status
@@ -158,7 +181,6 @@ Best regards,
       },
     });
 
-
     // If automation is enabled, mark it in the invoice or log for now
     // The actual reminder scheduling is handled by the existing reminder system
     if (automationEnabled && reminderSettings) {
@@ -167,7 +189,6 @@ Best regards,
       // setting up reminder steps. For now, we'll let the user set up reminders
       // through that endpoint after sending.
     }
-
 
     console.log(`Invoice ${invoice.number} sent successfully to ${invoice.client.email}`);
 
@@ -180,9 +201,12 @@ Best regards,
     });
   } catch (error) {
     console.error("Error sending invoice:", error);
-    return NextResponse.json({
-      error: "Failed to send invoice",
-      details: error instanceof Error ? error.message : "Unknown error"
-    }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Failed to send invoice",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
   }
 }

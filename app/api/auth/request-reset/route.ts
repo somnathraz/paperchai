@@ -1,10 +1,16 @@
 "use server";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { addHours, generateToken, hashToken } from "@/lib/auth-tokens";
+import { checkIpRateLimit } from "@/lib/rate-limiter";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  const rl = checkIpRateLimit(req);
+  if (!rl.allowed) {
+    return NextResponse.json({ error: rl.error }, { status: 429 });
+  }
+
   try {
     const { email } = await req.json();
     const normalizedEmail = email?.toLowerCase().trim();
