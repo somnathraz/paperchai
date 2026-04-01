@@ -31,10 +31,22 @@ export async function POST(req: Request) {
   }
 
   if (memberId) {
+    const member = await prisma.workspaceMember.findFirst({
+      where: { id: memberId, workspaceId: workspace.id },
+    });
+    if (!member) {
+      return NextResponse.json({ error: "Member not found" }, { status: 404 });
+    }
     await prisma.workspaceMember.delete({ where: { id: memberId } });
   }
 
   if (inviteId) {
+    const invite = await prisma.workspaceInvite.findFirst({
+      where: { id: inviteId, workspaceId: workspace.id },
+    });
+    if (!invite) {
+      return NextResponse.json({ error: "Invite not found" }, { status: 404 });
+    }
     await prisma.workspaceInvite.delete({ where: { id: inviteId } });
   }
 
