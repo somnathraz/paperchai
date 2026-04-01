@@ -15,6 +15,7 @@ import {
   AIReviewPanelSkeleton,
   AIPanelSkeleton,
 } from "./modern-editor/loading-skeletons";
+import { DynamicErrorBoundary } from "./modern-editor/DynamicErrorBoundary";
 
 // Dynamic imports for heavy components - reduces initial bundle by ~200KB
 const PropertiesPanel = dynamic(
@@ -41,14 +42,10 @@ const AIReviewPanel = dynamic(
   }
 );
 
-const AIPanel = dynamic(
-  () => import("./modern-editor/ai-panel").then((m) => m.AIPanel),
-  {
-    loading: () => <AIPanelSkeleton />,
-    ssr: false,
-  }
-);
-
+const AIPanel = dynamic(() => import("./modern-editor/ai-panel").then((m) => m.AIPanel), {
+  loading: () => <AIPanelSkeleton />,
+  ssr: false,
+});
 
 type ModernEditorProps = {
   firstName: string;
@@ -96,40 +93,50 @@ export function ModernEditor({
   const [sections, setSections] = useState<InvoiceSection[]>(
     // hydrate sections if they come from initial form state or sendMeta (edit flow)
     ((initialFormState as any)?.sections as InvoiceSection[] | undefined) ||
-    ((initialFormState as any)?.sendMeta?.sections as InvoiceSection[] | undefined) || [
-      { id: "header", title: "Header", visible: true },
-      { id: "from", title: "From Business", visible: true },
-      { id: "bill_to", title: "Bill To", visible: true },
-      { id: "items", title: "Items Table", visible: true },
-      { id: "discounts", title: "Discounts & Fees", visible: false },
-      { id: "summary", title: "Summary", visible: true },
-      { id: "notes", title: "Notes", visible: true },
-      { id: "payment", title: "Payment Instructions", visible: true },
-    ]
+      ((initialFormState as any)?.sendMeta?.sections as InvoiceSection[] | undefined) || [
+        { id: "header", title: "Header", visible: true },
+        { id: "from", title: "From Business", visible: true },
+        { id: "bill_to", title: "Bill To", visible: true },
+        { id: "items", title: "Items Table", visible: true },
+        { id: "discounts", title: "Discounts & Fees", visible: false },
+        { id: "summary", title: "Summary", visible: true },
+        { id: "notes", title: "Notes", visible: true },
+        { id: "payment", title: "Payment Instructions", visible: true },
+      ]
   );
-  const [clients, setClients] = useState<{
-    id: string;
-    name: string;
-    email?: string | null;
-    phone?: string | null;
-    company?: string | null;
-    addressLine1?: string | null;
-    addressLine2?: string | null;
-    city?: string | null;
-    state?: string | null;
-    postalCode?: string | null;
-    country?: string | null;
-    address?: string | null;
-  }[]>([]);
-  const [projects, setProjects] = useState<{
-    id: string;
-    name: string;
-    description?: string | null;
-    status?: string | null;
-    clientId?: string | null;
-    billableItems?: Array<{ title: string; quantity: number; unitPrice: number }> | null;
-    milestones?: Array<{ id: string; title: string; description?: string | null; amount: number; currency: string }> | null;
-  }[]>([]);
+  const [clients, setClients] = useState<
+    {
+      id: string;
+      name: string;
+      email?: string | null;
+      phone?: string | null;
+      company?: string | null;
+      addressLine1?: string | null;
+      addressLine2?: string | null;
+      city?: string | null;
+      state?: string | null;
+      postalCode?: string | null;
+      country?: string | null;
+      address?: string | null;
+    }[]
+  >([]);
+  const [projects, setProjects] = useState<
+    {
+      id: string;
+      name: string;
+      description?: string | null;
+      status?: string | null;
+      clientId?: string | null;
+      billableItems?: Array<{ title: string; quantity: number; unitPrice: number }> | null;
+      milestones?: Array<{
+        id: string;
+        title: string;
+        description?: string | null;
+        amount: number;
+        currency: string;
+      }> | null;
+    }[]
+  >([]);
 
   // Modal states
   const [createClientOpen, setCreateClientOpen] = useState(false);
@@ -156,7 +163,7 @@ export function ModernEditor({
       if (settingsRes.ok && !initialFormState) {
         const { settings } = await settingsRes.json();
         if (settings) {
-          setFormState(prev => ({
+          setFormState((prev) => ({
             ...prev,
             currency: settings.defaultCurrency || prev.currency,
             notes: settings.defaultNotes || prev.notes,
@@ -167,7 +174,7 @@ export function ModernEditor({
               defaultRate: settings.defaultTaxRate ?? 18,
             },
             // Apply default tax rate to first item if no tax rate set
-            items: prev.items.map(item => ({
+            items: prev.items.map((item) => ({
               ...item,
               taxRate: item.taxRate || settings.defaultTaxRate || 0,
             })),
@@ -201,33 +208,51 @@ export function ModernEditor({
     setTimeout(() => setToast(null), 3000);
   };
 
+  const validateInvoice = (): string | null => {
+    if (!formState.clientId) return "Select a client before continuing.";
+    const validItems = formState.items.filter(
+      (i) => i.title?.trim() && Number(i.quantity) > 0 && Number(i.unitPrice) > 0
+    );
+    if (validItems.length === 0) return "Add at least one item with a name, quantity, and price.";
+    const total = formState.items.reduce(
+      (sum, i) => sum + Number(i.quantity || 0) * Number(i.unitPrice || 0),
+      0
+    );
+    if (total <= 0) return "Invoice total must be greater than zero.";
+    return null;
+  };
+
   // Helper to populate invoice items from a project
   const populateItemsFromProject = (project: any) => {
     const newItems: any[] = [];
 
     // 1. Billable Items (Fixed/Retainer items)
     if (project.billableItems && project.billableItems.length > 0) {
-      newItems.push(...project.billableItems.map((item: any) => ({
-        title: item.title,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        taxRate: 0 // Default, will be overridden by tax settings
-      })));
+      newItems.push(
+        ...project.billableItems.map((item: any) => ({
+          title: item.title,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          taxRate: 0, // Default, will be overridden by tax settings
+        }))
+      );
     }
 
     // 2. Unbilled Milestones (Ready for Invoice)
     if (project.milestones && project.milestones.length > 0) {
-      newItems.push(...project.milestones.map((m: any) => ({
-        title: `Milestone: ${m.title}`,
-        description: m.description || undefined,
-        quantity: 1,
-        unitPrice: m.amount / 100, // Convert cents to base unit
-        taxRate: 0
-      })));
+      newItems.push(
+        ...project.milestones.map((m: any) => ({
+          title: `Milestone: ${m.title}`,
+          description: m.description || undefined,
+          quantity: 1,
+          unitPrice: m.amount / 100, // Convert cents to base unit
+          taxRate: 0,
+        }))
+      );
     }
 
     if (newItems.length > 0) {
-      setFormState(prev => ({
+      setFormState((prev) => ({
         ...prev,
         items: newItems,
       }));
@@ -239,7 +264,16 @@ export function ModernEditor({
 
   const handleClientUpdate = async (
     clientId: string,
-    data: Partial<{ email: string; phone: string; addressLine1: string; addressLine2: string; city: string; state: string; postalCode: string; country: string }>
+    data: Partial<{
+      email: string;
+      phone: string;
+      addressLine1: string;
+      addressLine2: string;
+      city: string;
+      state: string;
+      postalCode: string;
+      country: string;
+    }>
   ) => {
     const res = await fetch(`/api/clients/${clientId}`, {
       method: "PATCH",
@@ -248,8 +282,8 @@ export function ModernEditor({
     });
     if (res.ok) {
       // Update local clients state with the new data
-      setClients(prevClients =>
-        prevClients.map(c => c.id === clientId ? { ...c, ...data } : c)
+      setClients((prevClients) =>
+        prevClients.map((c) => (c.id === clientId ? { ...c, ...data } : c))
       );
     } else {
       throw new Error("Failed to update client");
@@ -293,8 +327,9 @@ export function ModernEditor({
         }}
         aiReviewIssueCount={aiReviewResult?.issues.length}
         onSaveDraft={async () => {
-          if (!formState.clientId) {
-            showToast("error", "Select a client before saving.");
+          const validationError = validateInvoice();
+          if (validationError) {
+            showToast("error", validationError);
             return;
           }
           // Auto-generate invoice number if not provided
@@ -340,7 +375,7 @@ export function ModernEditor({
 
             // Update form state with the generated number if it was auto-generated
             if (!formState.number) {
-              setFormState(prev => ({ ...prev, number: invoiceData.number }));
+              setFormState((prev) => ({ ...prev, number: invoiceData.number }));
             }
             showToast("success", "Draft saved successfully");
           } else {
@@ -349,8 +384,9 @@ export function ModernEditor({
           }
         }}
         onSchedule={async (payload) => {
-          if (!formState.clientId) {
-            showToast("error", "Select a client before scheduling.");
+          const validationError = validateInvoice();
+          if (validationError) {
+            showToast("error", validationError);
             return;
           }
           // Auto-generate invoice number if not provided
@@ -384,7 +420,7 @@ export function ModernEditor({
               setSavedInvoiceId(invoiceId);
               // Update form state with the generated number if it was auto-generated
               if (!formState.number) {
-                setFormState(prev => ({ ...prev, number: invoiceData.number }));
+                setFormState((prev) => ({ ...prev, number: invoiceData.number }));
               }
             } else {
               const errorText = await res.text();
@@ -475,8 +511,9 @@ export function ModernEditor({
           }
         }}
         onOpenSendModal={() => {
-          if (!formState.clientId) {
-            showToast("error", "Please select a client before sending.");
+          const validationError = validateInvoice();
+          if (validationError) {
+            showToast("error", validationError);
             return;
           }
           setSendModalOpen(true);
@@ -486,36 +523,41 @@ export function ModernEditor({
       {/* Main layout: Left Properties | Center Canvas | Right Templates Drawer */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Properties Panel (320px, collapsible) */}
-        <PropertiesPanel
-          formState={formState}
-          onFormStateChange={(newState) => {
-            // Logic to reset sent status if key fields change (creating a new invoice context)
-            if (lastSentAt || invoiceStatus === "sent") {
-              if (newState.clientId !== formState.clientId || newState.projectId !== formState.projectId) {
-                setSavedInvoiceId(undefined);
-                setInvoiceStatus(undefined);
-                setLastSentAt(undefined);
-                showToast("success", "Started new invoice");
+        <DynamicErrorBoundary fallbackLabel="Properties panel failed to load. Please refresh.">
+          <PropertiesPanel
+            formState={formState}
+            onFormStateChange={(newState) => {
+              // Logic to reset sent status if key fields change (creating a new invoice context)
+              if (lastSentAt || invoiceStatus === "sent") {
+                if (
+                  newState.clientId !== formState.clientId ||
+                  newState.projectId !== formState.projectId
+                ) {
+                  setSavedInvoiceId(undefined);
+                  setInvoiceStatus(undefined);
+                  setLastSentAt(undefined);
+                  showToast("success", "Started new invoice");
+                }
               }
-            }
-            setFormState(newState);
-          }}
-          clients={clients}
-          projects={projects}
-          sections={sections}
-          onSectionsChange={setSections}
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-          onWidthChange={setSidebarWidth}
-          onClientUpdate={handleClientUpdate}
-          onCreateClient={() => setCreateClientOpen(true)}
-          onCreateProject={() => setCreateProjectOpen(true)}
-          onProjectSelect={(project) => populateItemsFromProject(project)}
-          onEditProject={(project) => {
-            setProjectToEdit(project);
-            setCreateProjectOpen(true);
-          }}
-        />
+              setFormState(newState);
+            }}
+            clients={clients}
+            projects={projects}
+            sections={sections}
+            onSectionsChange={setSections}
+            collapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+            onWidthChange={setSidebarWidth}
+            onClientUpdate={handleClientUpdate}
+            onCreateClient={() => setCreateClientOpen(true)}
+            onCreateProject={() => setCreateProjectOpen(true)}
+            onProjectSelect={(project) => populateItemsFromProject(project)}
+            onEditProject={(project) => {
+              setProjectToEdit(project);
+              setCreateProjectOpen(true);
+            }}
+          />
+        </DynamicErrorBoundary>
 
         {/* Center: Large Canvas Preview (Hero) */}
         <div className="flex-1 overflow-hidden">
@@ -534,8 +576,12 @@ export function ModernEditor({
             sidebarCollapsed={sidebarCollapsed}
             sidebarWidth={sidebarWidth}
             sections={sections}
-            selectedClient={formState.clientId ? clients.find(c => c.id === formState.clientId) : undefined}
-            selectedProject={formState.projectId ? projects.find(p => p.id === formState.projectId) : undefined}
+            selectedClient={
+              formState.clientId ? clients.find((c) => c.id === formState.clientId) : undefined
+            }
+            selectedProject={
+              formState.projectId ? projects.find((p) => p.id === formState.projectId) : undefined
+            }
           />
         </div>
 
@@ -553,13 +599,15 @@ export function ModernEditor({
 
       {/* AI Panel (Bottom) */}
       {aiPanelOpen && (
-        <AIPanel
-          onClose={() => setAiPanelOpen(false)}
-          onGenerate={(data) => {
-            setFormState((prev) => ({ ...prev, ...data }));
-            setAiPanelOpen(false);
-          }}
-        />
+        <DynamicErrorBoundary fallbackLabel="AI panel failed to load.">
+          <AIPanel
+            onClose={() => setAiPanelOpen(false)}
+            onGenerate={(data) => {
+              setFormState((prev) => ({ ...prev, ...data }));
+              setAiPanelOpen(false);
+            }}
+          />
+        </DynamicErrorBoundary>
       )}
 
       {/* AI Button (Floating) */}
@@ -575,8 +623,9 @@ export function ModernEditor({
 
       {toast && (
         <div
-          className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white shadow-lg ${toast.type === "success" ? "bg-emerald-500" : "bg-rose-500"
-            }`}
+          className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white shadow-lg ${
+            toast.type === "success" ? "bg-emerald-500" : "bg-rose-500"
+          }`}
         >
           {toast.message}
         </div>
@@ -588,7 +637,7 @@ export function ModernEditor({
         onOpenChange={setCreateClientOpen}
         onClientCreated={(client) => {
           refreshClients();
-          setFormState(prev => ({ ...prev, clientId: client.id }));
+          setFormState((prev) => ({ ...prev, clientId: client.id }));
         }}
       />
       <CreateProjectModal
@@ -605,7 +654,7 @@ export function ModernEditor({
           const isEdit = !!projectToEdit;
           const isCurrent = formState.projectId === project.id;
           if (!isEdit) {
-            setFormState(prev => ({ ...prev, projectId: project.id }));
+            setFormState((prev) => ({ ...prev, projectId: project.id }));
             populateItemsFromProject(project);
           } else if (isCurrent) {
             populateItemsFromProject(project);
@@ -619,11 +668,24 @@ export function ModernEditor({
         onOpenChange={setSendModalOpen}
         invoice={{
           number: formState.number || "Draft",
-          total: formState.items.reduce((sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0), 0) * (1 + (formState.taxSettings?.defaultRate || 0) / 100),
-          subtotal: formState.items.reduce((sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0), 0),
-          tax: formState.items.reduce((sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0), 0) * ((formState.taxSettings?.defaultRate || 0) / 100),
+          total:
+            formState.items.reduce(
+              (sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0),
+              0
+            ) *
+            (1 + (formState.taxSettings?.defaultRate || 0) / 100),
+          subtotal: formState.items.reduce(
+            (sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0),
+            0
+          ),
+          tax:
+            formState.items.reduce(
+              (sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0),
+              0
+            ) *
+            ((formState.taxSettings?.defaultRate || 0) / 100),
           dueDate: formState.dueDate ? new Date(formState.dueDate).toISOString() : undefined,
-          items: formState.items.map(item => ({
+          items: formState.items.map((item) => ({
             name: item.title,
             quantity: item.quantity || 1,
             rate: item.unitPrice || 0,
@@ -631,10 +693,12 @@ export function ModernEditor({
           })),
           currency: formState.currency || "INR",
         }}
-        client={clients.find(c => c.id === formState.clientId)}
-        project={projects.find(p => p.id === formState.projectId)}
+        client={clients.find((c) => c.id === formState.clientId)}
+        project={projects.find((p) => p.id === formState.projectId)}
         templateName={selectedTemplateName || "Classic Gray"}
-        initialAutomationEnabled={!!(formState.remindersEnabled && formState.reminderSchedule?.steps?.length)}
+        initialAutomationEnabled={
+          !!(formState.remindersEnabled && formState.reminderSchedule?.steps?.length)
+        }
         onSend={async (options) => {
           if (!formState.clientId) {
             showToast("error", "Select a client before sending.");
@@ -696,21 +760,21 @@ export function ModernEditor({
 
             if (field === "taxRate") {
               // Apply tax rate to all items
-              setFormState(prev => ({
+              setFormState((prev) => ({
                 ...prev,
-                items: prev.items.map(item => ({ ...item, taxRate: value })),
+                items: prev.items.map((item) => ({ ...item, taxRate: value })),
               }));
             } else if (field === "notes") {
-              setFormState(prev => ({ ...prev, notes: value }));
+              setFormState((prev) => ({ ...prev, notes: value }));
             } else if (field === "terms") {
-              setFormState(prev => ({ ...prev, terms: value }));
+              setFormState((prev) => ({ ...prev, terms: value }));
             } else if (field === "dueDate") {
-              setFormState(prev => ({ ...prev, dueDate: value }));
+              setFormState((prev) => ({ ...prev, dueDate: value }));
             } else if (field === "currency") {
-              setFormState(prev => ({ ...prev, currency: value }));
+              setFormState((prev) => ({ ...prev, currency: value }));
             } else {
               // Generic field update
-              setFormState(prev => ({ ...prev, [field]: value }));
+              setFormState((prev) => ({ ...prev, [field]: value }));
             }
             showToast("success", `✓ Applied: ${issue.autoFix.label}`);
           }
@@ -718,9 +782,9 @@ export function ModernEditor({
         onApplySuggestion={(suggestion) => {
           console.log("Applying suggestion:", suggestion);
           if (suggestion.type === "description") {
-            setFormState(prev => ({
+            setFormState((prev) => ({
               ...prev,
-              items: prev.items.map(item =>
+              items: prev.items.map((item) =>
                 item.title?.toLowerCase().trim() === suggestion.original.toLowerCase().trim()
                   ? { ...item, title: suggestion.improved }
                   : item
@@ -737,7 +801,7 @@ export function ModernEditor({
             let itemsUpdated = false;
             let newTaxRate: number | undefined;
 
-            aiReviewResult.issues.forEach(issue => {
+            aiReviewResult.issues.forEach((issue) => {
               if (issue.autoFix) {
                 const { field, value } = issue.autoFix;
                 fixCount++;
@@ -758,10 +822,10 @@ export function ModernEditor({
             });
 
             // Apply all updates in one state change
-            setFormState(prev => {
+            setFormState((prev) => {
               const newState = { ...prev, ...updates };
               if (itemsUpdated && newTaxRate !== undefined) {
-                newState.items = prev.items.map(item => ({ ...item, taxRate: newTaxRate }));
+                newState.items = prev.items.map((item) => ({ ...item, taxRate: newTaxRate }));
               }
               return newState;
             });

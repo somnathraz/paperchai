@@ -48,7 +48,11 @@ model UserSettings {
   
   // Branding
   defaultTemplate String?
-  
+
+  // AI Autopilot
+  autoEscalateRiskyClients Boolean @default(true)
+  autoSendMonthlyRecap     Boolean @default(true)
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }

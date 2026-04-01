@@ -56,7 +56,12 @@ export default function LoginPage() {
     }
     setLoading(true);
     try {
-      const res = await signIn("credentials", { email, password, redirect: false, callbackUrl: "/dashboard" });
+      const res = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+        callbackUrl: "/dashboard",
+      });
       if (res?.error) {
         const message =
           res.error === "Account not found"
@@ -69,7 +74,7 @@ export default function LoginPage() {
                   ? "Invalid email or password."
                   : res.error === "Verify email to continue"
                     ? "Please verify your email before signing in."
-                  : "Could not sign in. Please try again.";
+                    : "Could not sign in. Please try again.";
         setError(message);
         setFailedAttempts((prev) => prev + 1);
       } else {
@@ -102,8 +107,8 @@ export default function LoginPage() {
         setError(data.error || "Could not send verification email.");
       } else {
         setStatus("Verification link sent. Check your email.");
-        if (data.verifyUrl) {
-          setStatus(`Verification link (dev): ${data.verifyUrl}`);
+        if (process.env.NODE_ENV === "development" && data.verifyUrl) {
+          setStatus(`Verification link (dev only): ${data.verifyUrl}`);
         }
       }
     } catch {
@@ -152,7 +157,10 @@ export default function LoginPage() {
 
             <div className="flex items-center justify-between text-sm text-muted-foreground">
               <label className="inline-flex items-center gap-2">
-                <input type="checkbox" className="rounded border-border text-primary focus:ring-primary" />
+                <input
+                  type="checkbox"
+                  className="rounded border-border text-primary focus:ring-primary"
+                />
                 Remember me
               </label>
               <Link href="/forgot-password" className="font-semibold text-primary hover:underline">
@@ -172,7 +180,11 @@ export default function LoginPage() {
               </div>
             )}
 
-            <PrimaryButton type="submit" icon={<ShieldCheck className="h-4 w-4" />} disabled={loading}>
+            <PrimaryButton
+              type="submit"
+              icon={<ShieldCheck className="h-4 w-4" />}
+              disabled={loading}
+            >
               {loading ? "Signing in..." : "Sign in"}
             </PrimaryButton>
 
