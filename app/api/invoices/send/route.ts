@@ -138,7 +138,7 @@ Best regards,
     });
 
     // Send the email
-    console.log(`Sending invoice ${invoice.number} to: ${invoice.client.email}`);
+    console.log(`Sending invoice ${invoice.number}...`);
     const emailSent = await sendEmail({
       to: invoice.client.email,
       subject: emailSubject,
@@ -190,7 +190,7 @@ Best regards,
       // through that endpoint after sending.
     }
 
-    console.log(`Invoice ${invoice.number} sent successfully to ${invoice.client.email}`);
+    console.log(`Invoice ${invoice.number} sent successfully`);
 
     return NextResponse.json({
       ok: true,
