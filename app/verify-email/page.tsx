@@ -43,8 +43,8 @@ export default function VerifyEmailPage() {
           setMessage(data.error || "Could not verify email.");
         } else {
           setStatus("success");
-          setMessage("Email verified. You can now sign in.");
-          setTimeout(() => router.push("/login"), 1200);
+          setMessage("Email verified. Setting up your workspace…");
+          setTimeout(() => router.push("/login?callbackUrl=/onboarding"), 1200);
         }
       } catch (error) {
         setStatus("error");
@@ -103,7 +103,10 @@ export default function VerifyEmailPage() {
             >
               Go to login
             </PrimaryButton>
-            <Link href="/forgot-password" className="text-sm font-semibold text-primary hover:underline">
+            <Link
+              href="/forgot-password"
+              className="text-sm font-semibold text-primary hover:underline"
+            >
               Forgot password? Request a reset
             </Link>
           </div>
