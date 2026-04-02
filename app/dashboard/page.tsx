@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { DashboardLayout } from "@/components/dashboard/layout-shell";
@@ -20,6 +21,19 @@ import { Insights } from "@/components/dashboard/insights";
 import { IntegrationPanel } from "@/components/dashboard/integration-panel";
 import { IntegrationProvider } from "@/lib/hooks/use-integration";
 
+function TabSkeleton() {
+  return (
+    <div className="space-y-6 animate-pulse">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-28 rounded-2xl bg-muted/60" />
+        ))}
+      </div>
+      <div className="h-64 rounded-2xl bg-muted/60" />
+    </div>
+  );
+}
+
 type Props = {
   searchParams: { tab?: string };
 };
@@ -31,19 +45,21 @@ export default async function DashboardPage({ searchParams }: Props) {
     redirect("/login?callbackUrl=/dashboard");
   }
 
-  const firstName = session.user?.name?.split(" ")[0] ?? session.user?.email?.split("@")[0] ?? "there";
+  const firstName =
+    session.user?.name?.split(" ")[0] ?? session.user?.email?.split("@")[0] ?? "there";
   const activeTab = searchParams.tab || "overview";
 
   return (
     <DashboardLayout userName={session.user?.name} userEmail={session.user?.email}>
       {/* Mobile-first centered container */}
       <div className="mx-auto w-full max-w-6xl space-y-6 pt-4 sm:pt-6 lg:px-8">
-
         {/* Responsive Header: Stacked on mobile, Flex on desktop */}
         <div className="flex flex-col gap-4 px-4 sm:flex-row sm:items-center sm:justify-between sm:px-0">
           <div className="space-y-1">
             <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Dashboard</p>
-            <h1 className="text-2xl font-bold leading-tight sm:text-3xl lg:text-4xl">Welcome back, {firstName}.</h1>
+            <h1 className="text-2xl font-bold leading-tight sm:text-3xl lg:text-4xl">
+              Welcome back, {firstName}.
+            </h1>
             <p className="text-sm text-muted-foreground sm:text-base">
               Money autopilot is live. Track payouts, reliability, and reminders.
             </p>
@@ -54,48 +70,58 @@ export default async function DashboardPage({ searchParams }: Props) {
         {/* Tab Navigation */}
         <DashboardTabNav activeTab={activeTab} />
 
-        {/* Tab Content - Server Components */}
+        {/* Tab Content - Server Components wrapped in Suspense */}
         <div className="min-h-[500px] px-4 sm:px-0">
           {activeTab === "overview" && (
-            <div className="space-y-6">
-              <OverviewCards />
-              <IntegrationProvider>
-                <IntegrationPanel />
-              </IntegrationProvider>
-              <CashflowCard />
-            </div>
+            <Suspense fallback={<TabSkeleton />}>
+              <div className="space-y-6">
+                <OverviewCards />
+                <IntegrationProvider>
+                  <IntegrationPanel />
+                </IntegrationProvider>
+                <CashflowCard />
+              </div>
+            </Suspense>
           )}
 
           {activeTab === "automation" && (
-            <div className="space-y-6">
-              <AutomationLifecycle />
-              <RemindersTimeline />
-            </div>
+            <Suspense fallback={<TabSkeleton />}>
+              <div className="space-y-6">
+                <AutomationLifecycle />
+                <RemindersTimeline />
+              </div>
+            </Suspense>
           )}
 
           {activeTab === "invoices" && (
-            <div className="space-y-6">
-              <InvoiceTable />
-              <ReliabilityTable />
-            </div>
+            <Suspense fallback={<TabSkeleton />}>
+              <div className="space-y-6">
+                <InvoiceTable />
+                <ReliabilityTable />
+              </div>
+            </Suspense>
           )}
 
           {activeTab === "clients" && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <ReliabilityRadar />
-                <ClientHealth />
+            <Suspense fallback={<TabSkeleton />}>
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  <ReliabilityRadar />
+                  <ClientHealth />
+                </div>
               </div>
-            </div>
+            </Suspense>
           )}
 
           {activeTab === "activity" && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <ActivityFeed />
-                <Insights />
+            <Suspense fallback={<TabSkeleton />}>
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  <ActivityFeed />
+                  <Insights />
+                </div>
               </div>
-            </div>
+            </Suspense>
           )}
         </div>
       </div>

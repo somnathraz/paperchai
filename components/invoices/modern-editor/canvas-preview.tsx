@@ -146,6 +146,19 @@ export const CanvasPreview = memo(function CanvasPreview({
     return { subtotal, tax, discountTotal, feeTotal, total };
   }, [formState.items, formState.adjustments, formState.taxSettings]);
 
+  const currency = formState.currency || "INR";
+  const fmt = (amount: number) => {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    } catch {
+      return `${currency} ${amount.toLocaleString()}`;
+    }
+  };
+
   const mockData = {
     businessName: formState.businessName || "Your Business",
     documentTitle: formState.documentTitle || "INVOICE",
@@ -177,11 +190,11 @@ export const CanvasPreview = memo(function CanvasPreview({
     taxLabel: formState.taxLabel || "Tax",
     extraSummaryLabel: formState.extraSummaryLabel,
     extraSummaryValue: formState.extraSummaryValue,
-    total: `₹${totals.total.toLocaleString()}`,
-    subtotal: `₹${totals.subtotal.toLocaleString()}`,
-    tax: `₹${totals.tax.toLocaleString()}`,
-    discount: totals.discountTotal ? `₹${totals.discountTotal.toLocaleString()}` : undefined,
-    fee: totals.feeTotal ? `₹${totals.feeTotal.toLocaleString()}` : undefined,
+    total: fmt(totals.total),
+    subtotal: fmt(totals.subtotal),
+    tax: fmt(totals.tax),
+    discount: totals.discountTotal ? fmt(totals.discountTotal) : undefined,
+    fee: totals.feeTotal ? fmt(totals.feeTotal) : undefined,
     notes: formState.notes,
     paymentTerms: formState.terms,
     reminderCadence: formState.reminderCadence,
@@ -194,7 +207,7 @@ export const CanvasPreview = memo(function CanvasPreview({
       unit: item.unit || "nos",
       rate: item.unitPrice || 0,
       hsnCode: item.hsnCode,
-      amount: `₹${((item.quantity || 0) * (item.unitPrice || 0)).toLocaleString()}`,
+      amount: fmt((item.quantity || 0) * (item.unitPrice || 0)),
     })),
   };
 
@@ -210,9 +223,9 @@ export const CanvasPreview = memo(function CanvasPreview({
     }
     if (visibilityMap.items === false) {
       mockData.items = [];
-      mockData.subtotal = "₹0";
-      mockData.tax = "₹0";
-      mockData.total = "₹0";
+      mockData.subtotal = fmt(0);
+      mockData.tax = fmt(0);
+      mockData.total = fmt(0);
     }
     if (visibilityMap.summary === false) {
       mockData.subtotal = "";
