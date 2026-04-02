@@ -27,6 +27,12 @@ export async function register() {
       missing.push("DATABASE_URL");
     }
 
+    // Required for AI features
+    if (!process.env.GOOGLE_API_KEY) {
+      // Warn but don't block — app works without AI if key is missing
+      console.warn("[startup] GOOGLE_API_KEY is not set — AI features will be unavailable");
+    }
+
     if (missing.length > 0) {
       console.error(`[startup] Missing required environment variables:\n  ${missing.join("\n  ")}`);
       // Throw in production so the deployment is rejected immediately
