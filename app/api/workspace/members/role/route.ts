@@ -30,10 +30,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Member and role are required" }, { status: 400 });
   }
 
-  await prisma.workspaceMember.update({
-    where: { id: memberId },
-    data: { role },
-  });
+  try {
+    const member = await prisma.workspaceMember.findFirst({
+      where: { id: memberId, workspaceId: workspace.id },
+    });
+    if (!member) {
+      return NextResponse.json({ error: "Member not found" }, { status: 404 });
+    }
 
-  return NextResponse.json({ success: true });
+    await prisma.workspaceMember.update({
+      where: { id: memberId },
+      data: { role },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("[members/role] Error updating role:", error);
+    return NextResponse.json({ error: "Failed to update role" }, { status: 500 });
+  }
 }

@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
         amount: formattedAmount,
         dueDate: formattedDueDate,
         companyName: workspace.name,
-        paymentLink: `https://paperchai.com/pay/${invoice.id}`, // Mock link
+        paymentLink: `${process.env.NEXTAUTH_URL || "https://paperchai.com"}/pay/${invoice.id}`,
       };
 
       const subject = replaceTemplateVariables(template.subject, vars);

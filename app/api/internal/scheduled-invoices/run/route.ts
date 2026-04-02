@@ -135,7 +135,7 @@ Best regards,
       });
 
       try {
-        console.log(`Sending scheduled invoice ${invoice.number} to: ${client.email}`);
+        console.log(`Sending scheduled invoice ${invoice.number}...`);
 
         const emailSent = await sendEmail({
           to: client.email,
@@ -182,7 +182,7 @@ Best regards,
           status: "SENT",
           sentTo: client.email,
         });
-        console.log(`Invoice ${invoice.number} sent successfully to ${client.email}`);
+        console.log(`Invoice ${invoice.number} sent successfully`);
       } catch (err: any) {
         console.error(`Failed to send scheduled invoice ${invoice.id}:`, err);
 
