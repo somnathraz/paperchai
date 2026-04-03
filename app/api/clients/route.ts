@@ -14,8 +14,8 @@ const createClientSchema = z.object({
   phone: z.string().max(50).optional(),
   whatsapp: z.string().max(50).optional(),
   businessType: z.string().max(100).optional(),
-  tags: z.array(z.string()).optional(),
-  categoryTags: z.array(z.string()).optional(),
+  tags: z.string().max(500).optional(), // stored as comma-separated string in DB
+  categoryTags: z.string().max(500).optional(),
   preferredPaymentMethod: z.string().max(100).optional(),
   paymentTerms: z.string().max(100).optional(),
   taxId: z.string().max(100).optional(),

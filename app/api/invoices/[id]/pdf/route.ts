@@ -19,7 +19,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 
   const invoiceId = params.id;
-  const headersList = headers();
+  const headersList = await headers();
   const cookieHeader = headersList.get("cookie");
 
   const browser = await puppeteer.launch({

@@ -36,13 +36,18 @@ export async function POST(req: NextRequest) {
     // Get user and workspace info for realistic test data
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
-      include: {
-        activeWorkspace: true,
-      },
+      select: { activeWorkspaceId: true },
     });
 
+    const workspace = user?.activeWorkspaceId
+      ? await prisma.workspace.findUnique({
+          where: { id: user.activeWorkspaceId },
+          select: { name: true, registeredEmail: true },
+        })
+      : null;
+
     const toEmail = recipientEmail || session.user.email;
-    const workspaceName = user?.activeWorkspace?.name || "Your Company";
+    const workspaceName = workspace?.name || "Your Company";
 
     // Mock data for preview
     const mockVars: TemplateVars = {
@@ -76,7 +81,7 @@ export async function POST(req: NextRequest) {
       to: toEmail,
       subject: `[TEST] ${processedSubject}`,
       html: themedHtml,
-      from: user?.activeWorkspace?.registeredEmail || undefined,
+      from: workspace?.registeredEmail || undefined,
     });
 
     return NextResponse.json({

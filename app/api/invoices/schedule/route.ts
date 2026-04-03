@@ -20,31 +20,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invoiceId and scheduledSendAt required" }, { status: 400 });
   }
 
-  const invoice = await prisma.invoice.update({
-    where: { id: invoiceId, workspaceId: workspace.id },
-    data: {
-      status: "scheduled",
-      scheduledSendAt: new Date(scheduledSendAt),
-      deliveryChannel: channel,
-      sendMeta: { templateSlug, reminderCadence },
-    },
-  });
+  try {
+    const invoice = await prisma.invoice.update({
+      where: { id: invoiceId, workspaceId: workspace.id },
+      data: {
+        status: "scheduled",
+        scheduledSendAt: new Date(scheduledSendAt),
+        deliveryChannel: channel,
+        sendMeta: { templateSlug, reminderCadence },
+      },
+    });
 
-  await prisma.reminderHistory.create({
-    data: {
-      workspaceId: workspace.id,
-      clientId: invoice.clientId,
-      projectId: invoice.projectId,
-      invoiceId: invoice.id,
-      channel,
-      kind: "schedule",
-      status: "scheduled",
-      previewToUser: true,
-      tone: "Warm",
-      sentAt: new Date(scheduledSendAt),
-      // meta field removed - reminderCadence is stored in invoice.sendMeta
-    },
-  });
+    await prisma.reminderHistory.create({
+      data: {
+        workspaceId: workspace.id,
+        clientId: invoice.clientId,
+        projectId: invoice.projectId,
+        invoiceId: invoice.id,
+        channel,
+        kind: "schedule",
+        status: "scheduled",
+        previewToUser: true,
+        tone: "Warm",
+        sentAt: new Date(scheduledSendAt),
+      },
+    });
 
-  return NextResponse.json({ ok: true, invoice });
+    return NextResponse.json({ ok: true, invoice });
+  } catch (error) {
+    console.error("[invoices/schedule] Error:", error);
+    return NextResponse.json({ error: "Failed to schedule invoice" }, { status: 500 });
+  }
 }

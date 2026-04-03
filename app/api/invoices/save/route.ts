@@ -81,57 +81,56 @@ export async function POST(req: Request) {
   }
 
   const template = templateSlug
-    ? await prisma.invoiceTemplate.findUnique({ where: { slug: templateSlug }, select: { id: true } })
+    ? await prisma.invoiceTemplate.findUnique({
+        where: { slug: templateSlug },
+        select: { id: true },
+      })
     : null;
 
   // Check if prices are tax-inclusive
   const isInclusive = taxSettings?.inclusive === true;
 
   // Calculate subtotal (before tax)
-  const subtotalCalc = items.reduce(
-    (sum: number, item: any) => {
-      const lineTotal = (item.quantity ?? 1) * (item.unitPrice ?? 0);
-      const rate = item.taxRate ?? 0;
+  const subtotalCalc = items.reduce((sum: number, item: any) => {
+    const lineTotal = (item.quantity ?? 1) * (item.unitPrice ?? 0);
+    const rate = item.taxRate ?? 0;
 
-      if (isInclusive && rate > 0) {
-        // Extract base from inclusive price: base = price / (1 + rate)
-        return sum + (lineTotal / (1 + rate / 100));
-      }
-      return sum + lineTotal;
-    },
-    0
-  );
+    if (isInclusive && rate > 0) {
+      // Extract base from inclusive price: base = price / (1 + rate)
+      return sum + lineTotal / (1 + rate / 100);
+    }
+    return sum + lineTotal;
+  }, 0);
 
   // Calculate tax total
-  const taxCalc = items.reduce(
-    (sum: number, item: any) => {
-      const lineTotal = (item.quantity ?? 1) * (item.unitPrice ?? 0);
-      const rate = item.taxRate ?? 0;
+  const taxCalc = items.reduce((sum: number, item: any) => {
+    const lineTotal = (item.quantity ?? 1) * (item.unitPrice ?? 0);
+    const rate = item.taxRate ?? 0;
 
-      if (isInclusive && rate > 0) {
-        // Extract tax from inclusive price: tax = price - (price / (1 + rate))
-        return sum + (lineTotal - (lineTotal / (1 + rate / 100)));
-      }
-      // Exclusive: tax = base * rate
-      return sum + ((lineTotal * rate) / 100);
-    },
-    0
-  );
+    if (isInclusive && rate > 0) {
+      // Extract tax from inclusive price: tax = price - (price / (1 + rate))
+      return sum + (lineTotal - lineTotal / (1 + rate / 100));
+    }
+    // Exclusive: tax = base * rate
+    return sum + (lineTotal * rate) / 100;
+  }, 0);
 
   // Calculate discounts and fees from adjustments (if provided)
-  const discountTotal = adjustments
-    ?.filter((a: any) => a.type === "discount")
-    .reduce((sum: number, adj: any) => {
-      const base = adj.mode === "percent" ? (adj.value / 100) * subtotalCalc : adj.value;
-      return sum + base;
-    }, 0) || 0;
+  const discountTotal =
+    adjustments
+      ?.filter((a: any) => a.type === "discount")
+      .reduce((sum: number, adj: any) => {
+        const base = adj.mode === "percent" ? (adj.value / 100) * subtotalCalc : adj.value;
+        return sum + base;
+      }, 0) || 0;
 
-  const feeTotal = adjustments
-    ?.filter((a: any) => a.type === "fee")
-    .reduce((sum: number, adj: any) => {
-      const base = adj.mode === "percent" ? (adj.value / 100) * subtotalCalc : adj.value;
-      return sum + base;
-    }, 0) || 0;
+  const feeTotal =
+    adjustments
+      ?.filter((a: any) => a.type === "fee")
+      .reduce((sum: number, adj: any) => {
+        const base = adj.mode === "percent" ? (adj.value / 100) * subtotalCalc : adj.value;
+        return sum + base;
+      }, 0) || 0;
 
   // Total calculation: subtotal + tax - discounts + fees
   const totalCalc = subtotalCalc + taxCalc - discountTotal + feeTotal;
@@ -155,60 +154,69 @@ export async function POST(req: Request) {
     total: totalCalc,
     // Store adjustments and sections in sendMeta for future reference
     sendMeta:
-      (adjustments && adjustments.length > 0) || sections || reminderCadence || attachments?.length || taxSettings
+      (adjustments && adjustments.length > 0) ||
+      sections ||
+      reminderCadence ||
+      attachments?.length ||
+      taxSettings
         ? {
-          adjustments,
-          discountTotal,
-          sections,
-          reminderCadence,
-          attachments,
-          taxSettings,
-          branding: {
-            fontFamily,
-            primaryColor,
-            accentColor,
-            backgroundColor,
-            gradientFrom,
-            gradientTo,
-            layoutDensity,
-            showBorder,
-          },
-          paymentTermOption,
-        }
+            adjustments,
+            discountTotal,
+            sections,
+            reminderCadence,
+            attachments,
+            taxSettings,
+            branding: {
+              fontFamily,
+              primaryColor,
+              accentColor,
+              backgroundColor,
+              gradientFrom,
+              gradientTo,
+              layoutDensity,
+              showBorder,
+            },
+            paymentTermOption,
+          }
         : undefined,
   };
 
-  const upserted = await prisma.invoice.upsert({
-    where: { id: id || "" },
-    update: {
-      ...data,
-      items: {
-        deleteMany: {},
-        create: items.map((item: any) => ({
-          title: item.title,
-          description: item.description,
-          quantity: item.quantity ?? 1,
-          unitPrice: item.unitPrice ?? 0,
-          taxRate: item.taxRate ?? 0,
-          total: item.total ?? 0,
-        })),
+  try {
+    const upserted = await prisma.invoice.upsert({
+      where: { id: id || "" },
+      update: {
+        ...data,
+        items: {
+          deleteMany: {},
+          create: items.map((item: any) => ({
+            title: item.title,
+            description: item.description,
+            quantity: item.quantity ?? 1,
+            unitPrice: item.unitPrice ?? 0,
+            taxRate: item.taxRate ?? 0,
+            total: item.total ?? 0,
+          })),
+        },
       },
-    },
-    create: {
-      ...data,
-      items: {
-        create: items.map((item: any) => ({
-          title: item.title,
-          description: item.description,
-          quantity: item.quantity ?? 1,
-          unitPrice: item.unitPrice ?? 0,
-          taxRate: item.taxRate ?? 0,
-          total: item.total ?? 0,
-        })),
+      create: {
+        ...data,
+        items: {
+          create: items.map((item: any) => ({
+            title: item.title,
+            description: item.description,
+            quantity: item.quantity ?? 1,
+            unitPrice: item.unitPrice ?? 0,
+            taxRate: item.taxRate ?? 0,
+            total: item.total ?? 0,
+          })),
+        },
       },
-    },
-    include: { items: true },
-  });
+      include: { items: true },
+    });
 
-  return NextResponse.json({ invoice: upserted });
+    return NextResponse.json({ invoice: upserted });
+  } catch (error) {
+    console.error("[invoices/save] Error:", error);
+    return NextResponse.json({ error: "Failed to save invoice" }, { status: 500 });
+  }
 }
