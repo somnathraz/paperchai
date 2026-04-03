@@ -1,11 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 import { headers } from "next/headers";
 import { checkIpRateLimit } from "@/lib/rate-limiter";
 
 const PDF_TIMEOUT_MS = 30_000;
+
+// Local Chrome path per platform — used in development only
+function localChromePath() {
+  if (process.platform === "win32") {
+    return "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+  }
+  if (process.platform === "darwin") {
+    return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  }
+  return "/usr/bin/google-chrome";
+}
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const rl = checkIpRateLimit(req);
@@ -22,14 +34,18 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const headersList = await headers();
   const cookieHeader = headersList.get("cookie");
 
+  const isProduction = process.env.NODE_ENV === "production";
+
+  // @sparticuz/chromium provides a stripped-down Chromium binary that fits
+  // within Vercel's 50 MB serverless function limit.
+  const executablePath = isProduction ? await chromium.executablePath() : localChromePath();
+
   const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox", // required in containerised/serverless environments
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage", // prevents crashes on low-memory containers
-      "--disable-gpu",
-    ],
+    args: isProduction
+      ? chromium.args // includes --no-sandbox, --disable-dev-shm-usage, etc.
+      : ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+    executablePath,
+    headless: isProduction ? chromium.headless : true,
     protocolTimeout: PDF_TIMEOUT_MS,
   });
 
@@ -38,7 +54,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     await page.setExtraHTTPHeaders({ cookie: cookieHeader || "" });
 
-    const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
+    const protocol = isProduction ? "https" : "http";
     const host = headersList.get("host") || "localhost:3000";
     const baseUrl = `${protocol}://${host}`;
 
