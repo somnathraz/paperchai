@@ -64,3 +64,8 @@ Thumbs.db
 *.log
 logs/
 
+logo/
+
+# Internal documentation
+# Internal documentation
+/docs/

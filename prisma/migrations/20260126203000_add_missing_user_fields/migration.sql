@@ -1,0 +1,11 @@
+-- CreateEnum
+CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'SUSPENDED', 'DELETED');
+
+-- CreateEnum
+CREATE TYPE "PlatformRole" AS ENUM ('USER', 'SUPPORT', 'PLATFORM_ADMIN', 'INTERNAL_DEV', 'INTERNAL_OWNER');
+
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
+ADD COLUMN "platformRole" "PlatformRole" NOT NULL DEFAULT 'USER',
+ADD COLUMN "locale" TEXT NOT NULL DEFAULT 'en-IN',
+ADD COLUMN "lastLoginAt" TIMESTAMP(3);

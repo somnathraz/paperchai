@@ -19,20 +19,22 @@ export function SettingsLayout({ current, title, description, children }: Settin
   const router = useRouter();
 
   // Get current section name from path
-  const sectionName = (current.split("/").pop() ?? "").charAt(0).toUpperCase() + (current.split("/").pop() ?? "").slice(1);
+  const sectionName =
+    (current.split("/").pop() ?? "").charAt(0).toUpperCase() +
+    (current.split("/").pop() ?? "").slice(1);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white via-[#f7fafc] to-[#ecf2f7] px-4 sm:px-6 lg:px-8 py-6 sm:py-12">
       <div className="mx-auto w-full max-w-5xl">
         {/* Mobile: stacked, Desktop: 2-column grid */}
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,0.9fr)_minmax(0,2fr)]">
-          {/* Settings Nav - hidden on mobile */}
-          <div className="w-full">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,0.9fr)_minmax(0,2fr)] items-start">
+          {/* Settings Nav - hidden on mobile by component, but we add sticky wrapper logic here for desktop */}
+          <div className="w-full hidden md:block sticky top-24 self-start max-h-[calc(100vh-8rem)] overflow-y-auto no-scrollbar">
             <SettingsSidebar current={current} />
           </div>
 
           {/* Main Content Area */}
-          <div className="flex-1 space-y-6 rounded-2xl border border-white/20 bg-white/80 p-4 sm:p-6 lg:p-8 shadow-[0_40px_140px_-60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
+          <div className="min-w-0 flex-1 space-y-6 rounded-2xl border border-white/20 bg-white/80 p-4 sm:p-6 lg:p-8 shadow-[0_40px_140px_-60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
             {/* Mobile-only mini header with Sections button */}
             <div className="mb-3 flex items-center justify-between md:hidden">
               <div>
@@ -92,7 +94,9 @@ export function SettingsLayout({ current, title, description, children }: Settin
           <div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-white border-r border-border/40 shadow-2xl p-4 flex flex-col animate-in slide-in-from-left duration-300">
             <div className="mb-4 flex items-center justify-between border-b border-border/40 pb-3">
               <div>
-                <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Settings</p>
+                <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                  Settings
+                </p>
                 <p className="text-base font-semibold text-foreground">PaperChai</p>
               </div>
               <button
@@ -119,33 +123,36 @@ export function SettingsLayout({ current, title, description, children }: Settin
           <div className="flex items-center justify-center gap-2 rounded-full border border-border/60 bg-white/95 px-3 py-2 shadow-lg backdrop-blur-sm">
             <button
               type="button"
-              onClick={() => router.push('/settings/profile')}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition ${current === '/settings/profile'
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
+              onClick={() => router.push("/settings/profile")}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition ${
+                current === "/settings/profile"
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
             >
               <User className="h-3 w-3" />
               Profile
             </button>
             <button
               type="button"
-              onClick={() => router.push('/settings/reminders')}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition ${current === '/settings/reminders'
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
+              onClick={() => router.push("/settings/reminders")}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition ${
+                current === "/settings/reminders"
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
             >
               <Bell className="h-3 w-3" />
               Reminders
             </button>
             <button
               type="button"
-              onClick={() => router.push('/settings/billing')}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition ${current === '/settings/billing'
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
+              onClick={() => router.push("/settings/billing")}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition ${
+                current === "/settings/billing"
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
             >
               <CreditCard className="h-3 w-3" />
               Billing
@@ -156,4 +163,3 @@ export function SettingsLayout({ current, title, description, children }: Settin
     </div>
   );
 }
-

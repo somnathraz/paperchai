@@ -3,23 +3,30 @@ import { Suspense } from "react";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { DashboardLayout } from "@/components/dashboard/layout-shell";
-import { SummaryBar } from "@/components/dashboard/summary-bar";
 import { DashboardTabNav } from "@/components/dashboard/dashboard-tabs";
 import { FabActions } from "@/components/dashboard/fab-actions";
 
-// Import all server components
-import { OverviewCards } from "@/components/dashboard/overview-cards";
-import { CashflowCard } from "@/components/dashboard/cashflow";
+// Import all dashboard components
 import { AutomationLifecycle } from "@/components/dashboard/automation-lifecycle";
 import { RemindersTimeline } from "@/components/dashboard/reminders-timeline";
-import { InvoiceTable } from "@/components/dashboard/invoice-table";
+import { InvoiceTableWidget } from "@/features/dashboard/components/InvoiceTableWidget";
 import { ReliabilityRadar } from "@/components/dashboard/reliability-radar";
 import { ReliabilityTable } from "@/components/dashboard/reliability-table";
 import { ClientHealth } from "@/components/dashboard/client-health";
-import { ActivityFeed } from "@/components/dashboard/activity-feed";
+import { ActivityWidget } from "@/features/dashboard/components/ActivityWidget";
 import { Insights } from "@/components/dashboard/insights";
-import { IntegrationPanel } from "@/components/dashboard/integration-panel";
-import { IntegrationProvider } from "@/lib/hooks/use-integration";
+import { RecurringPlansSection } from "@/features/automation/components/RecurringPlansSection";
+
+// New Stage Logic Imports (v2)
+import { getDashboardState } from "@/features/dashboard/lib/get-dashboard-state";
+import { SetupView } from "@/features/dashboard/components/stages/SetupView";
+import { DraftView } from "@/features/dashboard/components/stages/DraftView";
+import { WaitingView } from "@/features/dashboard/components/stages/WaitingView";
+import { ActionView } from "@/features/dashboard/components/stages/ActionView";
+import { CelebrationView } from "@/features/dashboard/components/stages/CelebrationView";
+import { InsightsView } from "@/features/dashboard/components/stages/InsightsView";
+import { OverviewV2Section } from "@/features/dashboard/components/OverviewV2Section";
+import { ReceivablesSection } from "@/features/dashboard/components/ReceivablesSection";
 
 function TabSkeleton() {
   return (
@@ -35,7 +42,7 @@ function TabSkeleton() {
 }
 
 type Props = {
-  searchParams: { tab?: string };
+  searchParams: Promise<{ tab?: string }>;
 };
 
 export default async function DashboardPage({ searchParams }: Props) {
@@ -45,9 +52,18 @@ export default async function DashboardPage({ searchParams }: Props) {
     redirect("/login?callbackUrl=/dashboard");
   }
 
+  const userId = session.user?.id;
+  if (!userId) {
+    redirect("/login");
+  }
+
   const firstName =
     session.user?.name?.split(" ")[0] ?? session.user?.email?.split("@")[0] ?? "there";
-  const activeTab = searchParams.tab || "overview";
+  const params = await searchParams;
+  const activeTab = params.tab || "overview";
+
+  // Calculate Dashboard State
+  const dashboardState = await getDashboardState(userId);
 
   return (
     <DashboardLayout userName={session.user?.name} userEmail={session.user?.email}>
@@ -61,7 +77,16 @@ export default async function DashboardPage({ searchParams }: Props) {
               Welcome back, {firstName}.
             </h1>
             <p className="text-sm text-muted-foreground sm:text-base">
-              Money autopilot is live. Track payouts, reliability, and reminders.
+              {dashboardState.stage === "NO_INVOICE_YET" &&
+                "Let's get your financial engine running."}
+              {dashboardState.stage === "INVOICE_CREATED_BUT_NOT_SENT" &&
+                "You're almost there. Send your draft."}
+              {dashboardState.stage === "SENT_WAITING_FOR_PAYMENT" &&
+                "Your invoices are flying. We're tracking them."}
+              {dashboardState.stage === "OVERDUE_EXISTS" && "Some items need your attention."}
+              {dashboardState.stage === "FIRST_PAYMENT_RECEIVED" && "You're off to a great start."}
+              {dashboardState.stage === "MATURE_USER" &&
+                "Money autopilot is live. Track payouts and reliability."}
             </p>
           </div>
           {/* Add dashboard-level actions here if needed */}
@@ -75,11 +100,23 @@ export default async function DashboardPage({ searchParams }: Props) {
           {activeTab === "overview" && (
             <Suspense fallback={<TabSkeleton />}>
               <div className="space-y-6">
-                <OverviewCards />
-                <IntegrationProvider>
-                  <IntegrationPanel />
-                </IntegrationProvider>
-                <CashflowCard />
+                <OverviewV2Section />
+
+                {/* STRICT STATE MACHINE RENDERING */}
+                {dashboardState.stage === "NO_INVOICE_YET" && <SetupView />}
+                {dashboardState.stage === "INVOICE_CREATED_BUT_NOT_SENT" && (
+                  <DraftView state={dashboardState} />
+                )}
+                {dashboardState.stage === "SENT_WAITING_FOR_PAYMENT" && (
+                  <WaitingView state={dashboardState} />
+                )}
+                {dashboardState.stage === "OVERDUE_EXISTS" && (
+                  <ActionView state={dashboardState} userId={userId} />
+                )}
+                {dashboardState.stage === "FIRST_PAYMENT_RECEIVED" && (
+                  <CelebrationView state={dashboardState} />
+                )}
+                {dashboardState.stage === "MATURE_USER" && <InsightsView />}
               </div>
             </Suspense>
           )}
@@ -88,15 +125,22 @@ export default async function DashboardPage({ searchParams }: Props) {
             <Suspense fallback={<TabSkeleton />}>
               <div className="space-y-6">
                 <AutomationLifecycle />
+                <RecurringPlansSection compact />
                 <RemindersTimeline />
               </div>
             </Suspense>
           )}
 
+          {activeTab === "receivables" && (
+            <div className="space-y-6">
+              <ReceivablesSection />
+            </div>
+          )}
+
           {activeTab === "invoices" && (
             <Suspense fallback={<TabSkeleton />}>
               <div className="space-y-6">
-                <InvoiceTable />
+                <InvoiceTableWidget />
                 <ReliabilityTable />
               </div>
             </Suspense>
@@ -117,7 +161,7 @@ export default async function DashboardPage({ searchParams }: Props) {
             <Suspense fallback={<TabSkeleton />}>
               <div className="space-y-6">
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                  <ActivityFeed />
+                  <ActivityWidget />
                   <Insights />
                 </div>
               </div>

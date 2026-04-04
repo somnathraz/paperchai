@@ -1,13 +1,13 @@
 // Footer is a Server Component - no client interactivity needed
 import { cn } from "@/lib/utils";
 import { Mail, Twitter, Instagram, Github } from "lucide-react";
+import Link from "next/link";
 
 export function Footer({ className }: { className?: string }) {
-
   return (
     <footer
       className={cn(
-        "mt-20 rounded-3xl border border-white/10 bg-gradient-to-br from-white/70 via-white/40 to-white/20 p-10 shadow-[0_20px_120px_-40px_rgba(0,0,0,0.4)] backdrop-blur-2xl",
+        "mt-12 rounded-3xl border border-white/10 bg-gradient-to-br from-white/70 via-white/40 to-white/20 p-10 shadow-[0_20px_120px_-40px_rgba(0,0,0,0.4)] backdrop-blur-2xl sm:mt-16",
         className
       )}
     >
@@ -19,8 +19,8 @@ export function Footer({ className }: { className?: string }) {
             <span className="text-primary">●</span> PaperChai
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Money Autopilot for freelancers who hate chasing.
-            Trusted by 1,200+ creators, studios, and consultants.
+            Money Autopilot for freelancers who hate chasing. Trusted by 1,200+ creators, studios,
+            and consultants.
           </p>
           {/* Socials */}
           <div className="flex items-center gap-4 pt-2">
@@ -37,11 +37,11 @@ export function Footer({ className }: { className?: string }) {
         </div>
 
         {/* Links */}
-        <div className="grid grid-cols-2 gap-10 text-sm sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-10 text-sm sm:grid-cols-4">
           <div className="space-y-3">
             <p className="font-semibold text-foreground/90">Product</p>
-            <FooterLink label="Features" />
-            <FooterLink label="Pricing" />
+            <FooterLink label="Features" href="#features" />
+            <FooterLink label="Pricing" href="#pricing" />
             <FooterLink label="Templates" />
             <FooterLink label="Integrations" />
           </div>
@@ -58,8 +58,16 @@ export function Footer({ className }: { className?: string }) {
             <p className="font-semibold text-foreground/90">Support</p>
             <FooterLink label="Help Center" />
             <FooterLink label="Tutorials" />
-            <FooterLink label="Security" />
-            <FooterLink label="Contact" />
+            <FooterLink label="FAQ" href="#faq" />
+            <FooterLink label="Contact" href="/contact-us" />
+          </div>
+
+          <div className="space-y-3">
+            <p className="font-semibold text-foreground/90">Legal</p>
+            <FooterLink label="Privacy Policy" href="/privacy-policy" />
+            <FooterLink label="Terms & Conditions" href="/terms-and-conditions" />
+            <FooterLink label="Refund Policy" href="/refund-policy" />
+            <FooterLink label="Cookie Policy" href="/cookie-policy" />
           </div>
         </div>
       </div>
@@ -70,26 +78,32 @@ export function Footer({ className }: { className?: string }) {
       {/* Bottom */}
       <div className="flex flex-col items-center justify-between gap-4 text-xs text-muted-foreground sm:flex-row">
         <p>© PaperChai 2025. All rights reserved.</p>
-        <div className="flex items-center gap-4">
-          <FooterLink label="Terms" small />
-          <FooterLink label="Privacy" small />
-          <FooterLink label="Cookies" small />
+        <div className="flex items-center gap-4 text-[10px] opacity-60">
+          <span>Reliable invoicing for the global creator economy.</span>
         </div>
       </div>
     </footer>
   );
 }
 
-function FooterLink({ label, small }: { label: string; small?: boolean }) {
+function FooterLink({
+  label,
+  href = "#",
+  small,
+}: {
+  label: string;
+  href?: string;
+  small?: boolean;
+}) {
   return (
-    <a
-      href="#"
+    <Link
+      href={href}
       className={cn(
         "block text-muted-foreground transition hover:text-primary hover:underline decoration-primary/40",
         small && "text-[11px]"
       )}
     >
       {label}
-    </a>
+    </Link>
   );
 }

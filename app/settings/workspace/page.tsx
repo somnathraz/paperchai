@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { ensureActiveWorkspace } from "@/lib/workspace";
 import { SettingsLayout } from "@/components/settings/settings-layout";
 import { WorkspaceForm } from "@/components/settings/workspace-form";
 
@@ -11,16 +12,11 @@ export default async function WorkspaceSettingsPage() {
     redirect("/login?callbackUrl=/settings/workspace");
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    include: { activeWorkspace: true },
-  });
+  const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
 
-  if (!user || !user.activeWorkspace) {
+  if (!workspace) {
     redirect("/dashboard");
   }
-
-  const workspace = user.activeWorkspace;
 
   return (
     <SettingsLayout

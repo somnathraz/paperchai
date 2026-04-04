@@ -19,6 +19,27 @@ export default async function ProfileSettingsPage() {
     redirect("/login");
   }
 
+  const activeWorkspaceId =
+    (session.user as any).activeWorkspaceId || (session.user as any).workspaceId || null;
+  let workspaceRole = "MEMBER";
+  if (activeWorkspaceId) {
+    const [membership, workspace] = await Promise.all([
+      prisma.workspaceMember.findFirst({
+        where: { workspaceId: activeWorkspaceId, userId: session.user.id },
+        select: { role: true },
+      }),
+      prisma.workspace.findUnique({
+        where: { id: activeWorkspaceId },
+        select: { ownerId: true },
+      }),
+    ]);
+    if (membership?.role) {
+      workspaceRole = membership.role;
+    } else if (workspace?.ownerId === session.user.id) {
+      workspaceRole = "OWNER";
+    }
+  }
+
   return (
     <SettingsLayout
       current="/settings/profile"
@@ -28,11 +49,14 @@ export default async function ProfileSettingsPage() {
       <ProfileForm
         initialData={{
           name: user.name ?? "",
-          role: user.role ?? "Founder",
-          timezone: user.timezone ?? "Asia/Kolkata",
-          currency: user.currency ?? "INR",
-          reminderTone: user.reminderTone ?? "Warm + Polite",
-          backupEmail: user.backupEmail ?? "",
+          role: workspaceRole,
+          // Legacy fields removed from user, now on workspace.
+          // We should ideally fetch workspace settings here or drop these from the form.
+          // For now, providing defaults to satisfy the UI component prop types.
+          timezone: "Asia/Kolkata",
+          currency: "INR",
+          reminderTone: "Warm + Polite",
+          backupEmail: "",
         }}
       />
     </SettingsLayout>

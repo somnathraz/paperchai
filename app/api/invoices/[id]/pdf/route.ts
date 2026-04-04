@@ -5,6 +5,8 @@ import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import { headers } from "next/headers";
 import { checkIpRateLimit } from "@/lib/rate-limiter";
+import { ensureActiveWorkspace } from "@/lib/workspace";
+import { prisma } from "@/lib/prisma";
 
 const PDF_TIMEOUT_MS = 30_000;
 
@@ -19,18 +21,32 @@ function localChromePath() {
   return "/usr/bin/google-chrome";
 }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const rl = checkIpRateLimit(req);
   if (!rl.allowed) {
     return NextResponse.json({ error: rl.error }, { status: 429 });
   }
 
+  // 1. Check Auth
   const session = await getServerSession(authOptions);
-  if (!session) {
+  if (!session?.user?.id) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  const invoiceId = params.id;
+  const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+  if (!workspace) {
+    return new NextResponse("Workspace not found", { status: 404 });
+  }
+
+  const { id } = await params;
+  const invoice = await prisma.invoice.findFirst({
+    where: { id, workspaceId: workspace.id },
+    select: { id: true },
+  });
+  if (!invoice) {
+    return new NextResponse("Invoice not found", { status: 404 });
+  }
+
   const headersList = await headers();
   const cookieHeader = headersList.get("cookie");
 
@@ -58,7 +74,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const host = headersList.get("host") || "localhost:3000";
     const baseUrl = `${protocol}://${host}`;
 
-    await page.goto(`${baseUrl}/invoices/${invoiceId}/pdf-view`, {
+    await page.goto(`${baseUrl}/invoices/${id}/pdf-view`, {
       waitUntil: "networkidle0",
       timeout: PDF_TIMEOUT_MS,
     });
@@ -72,7 +88,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return new NextResponse(Buffer.from(pdf), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="invoice-${invoiceId}.pdf"`,
+        "Content-Disposition": `attachment; filename="invoice-${id}.pdf"`,
       },
     });
   } catch (error) {

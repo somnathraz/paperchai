@@ -5,6 +5,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
+import { z } from "zod";
+
+const switchWorkspaceSchema = z.object({
+  workspaceId: z.string().cuid(),
+});
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -12,13 +17,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { workspaceId } = await req.json();
-  if (!workspaceId) {
-    return NextResponse.json({ error: "Workspace ID is required" }, { status: 400 });
+  const parsed = switchWorkspaceSchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Valid workspace ID is required" }, { status: 422 });
   }
+  const { workspaceId } = parsed.data;
 
   const membership = await prisma.workspaceMember.findFirst({
-    where: { userId: session.user.id, workspaceId },
+    where: {
+      userId: session.user.id,
+      workspaceId,
+      removedAt: null,
+      workspace: { deletedAt: null },
+    },
   });
 
   if (!membership) {
@@ -30,7 +41,8 @@ export async function POST(req: Request) {
     data: { activeWorkspaceId: workspaceId },
   });
 
-  cookies().set("paperchai_workspace", workspaceId, { httpOnly: true, path: "/" });
+  const cookieStore = await cookies();
+  cookieStore.set("paperchai_workspace", workspaceId, { httpOnly: true, path: "/" });
 
   return NextResponse.json({ success: true });
 }

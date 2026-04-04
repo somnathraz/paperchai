@@ -2,13 +2,20 @@
 
 import { TemplateProps } from "./types";
 import { getOrderedSections } from "./section-renderer";
+import Image from "next/image";
 
 /**
  * Essential Pro - Clean SaaS style (Stripe-like)
  * Layout: Right-aligned totals | Tags for line items | Client contact card
  * Slot order: left: ["bill_to", "notes"], right: ["summary", "payment"], main: ["header", "items"]
  */
-export function EssentialPro({ preview = false, modalPreview = false, mockData, sectionVisibility, sections }: TemplateProps) {
+export function EssentialPro({
+  preview = false,
+  modalPreview = false,
+  mockData,
+  sectionVisibility,
+  sections,
+}: TemplateProps) {
   const data = mockData || {
     businessName: "Your Business",
     invoiceNumber: "INV-2024-001",
@@ -43,7 +50,9 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
         if (!show("bill_to")) return null;
         return (
           <div className="px-12 py-8 bg-[#F8F9FA] border-b border-[#EAEAEA]">
-            <p className="text-[13px] font-semibold mb-2 text-[#666666] uppercase tracking-wide">Bill To</p>
+            <p className="text-[13px] font-semibold mb-2 text-[#666666] uppercase tracking-wide">
+              Bill To
+            </p>
             <p className="text-[16px] text-[#111111] leading-relaxed">{data.clientName}</p>
           </div>
         );
@@ -54,8 +63,12 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[#EAEAEA]">
-                  <th className="text-left py-3 text-[12px] font-semibold text-[#666666] uppercase tracking-wide">Description</th>
-                  <th className="text-right py-3 text-[12px] font-semibold text-[#666666] uppercase tracking-wide">Amount</th>
+                  <th className="text-left py-3 text-[12px] font-semibold text-[#666666] uppercase tracking-wide">
+                    Description
+                  </th>
+                  <th className="text-right py-3 text-[12px] font-semibold text-[#666666] uppercase tracking-wide">
+                    Amount
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -63,11 +76,17 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
                   <tr key={idx} className="border-b border-[#EAEAEA]/50">
                     <td className="py-4">
                       <div className="flex items-center gap-2">
-                        <span className="px-2 py-1 text-[11px] font-medium bg-[#3A7BFF]/10 text-[#3A7BFF] rounded">Service</span>
-                        <span className="text-[14px] text-[#111111] leading-relaxed">{item.name}</span>
+                        <span className="px-2 py-1 text-[11px] font-medium bg-[#3A7BFF]/10 text-[#3A7BFF] rounded">
+                          Service
+                        </span>
+                        <span className="text-[14px] text-[#111111] leading-relaxed">
+                          {item.name}
+                        </span>
                       </div>
                     </td>
-                    <td className="py-4 text-right text-[14px] font-medium text-[#111111]">{item.amount}</td>
+                    <td className="py-4 text-right text-[14px] font-medium text-[#111111]">
+                      {item.amount}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -120,24 +139,43 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
         if (!show("notes")) return null;
         return (
           <div className="px-12 py-8 bg-[#F8F9FA] border-b border-[#EAEAEA]">
-            <p className="text-[13px] font-semibold mb-2 text-[#666666] uppercase tracking-wide">Notes</p>
-            <p className="text-[14px] text-[#111111] leading-relaxed whitespace-pre-line">{data.notes}</p>
+            <p className="text-[13px] font-semibold mb-2 text-[#666666] uppercase tracking-wide">
+              Notes
+            </p>
+            <p className="text-[14px] text-[#111111] leading-relaxed whitespace-pre-line">
+              {data.notes}
+            </p>
           </div>
         );
       case "payment":
         if (!show("payment")) return null;
         return (
           <div className="px-12 py-6 border-t border-[#EAEAEA] text-center bg-[#F8F9FA]">
-            <p className="text-[13px] text-[#666666]">{data.paymentTerms || "Payment due in 30 days"}</p>
+            <p className="text-[13px] text-[#666666]">
+              {data.paymentTerms || "Payment due in 30 days"}
+            </p>
             {data.reminderCadence && (
               <p className="text-[12px] text-[#888888] mt-1">
-                Reminders: Soft {data.reminderCadence.softDays ?? "-"}d · Medium {data.reminderCadence.mediumDays ?? "-"}d · Firm {data.reminderCadence.firmDays ?? "-"}d
+                Reminders: Soft {data.reminderCadence.softDays ?? "-"}d · Medium{" "}
+                {data.reminderCadence.mediumDays ?? "-"}d · Firm{" "}
+                {data.reminderCadence.firmDays ?? "-"}d
               </p>
             )}
+            {/* Signature */}
             {data.signatureUrl && (
-              <div className="mt-3 flex justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={data.signatureUrl} alt="Signature" className="h-12 object-contain" />
+              <div className="mt-12 flex justify-end">
+                <div className="text-right">
+                  <div className="mb-2 h-16 w-32 relative">
+                    <Image
+                      src={data.signatureUrl || ""}
+                      alt="Signature"
+                      width={128}
+                      height={64}
+                      className="h-full w-full object-contain object-right"
+                    />
+                  </div>
+                  <p className="text-sm font-medium text-gray-900">{data.businessName}</p>
+                </div>
               </div>
             )}
           </div>
@@ -149,11 +187,14 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
 
   // Essential Pro slot map: left: ["bill_to", "notes"], right: ["summary", "payment"], main: ["header", "items"]
   // Get ordered sections - this respects manual ordering but groups by slot
-  const orderedSections = getOrderedSections(
-    "essential-pro",
-    sections,
-    ["header", "bill_to", "items", "summary", "notes", "payment"]
-  );
+  const orderedSections = getOrderedSections("essential-pro", sections, [
+    "header",
+    "bill_to",
+    "items",
+    "summary",
+    "notes",
+    "payment",
+  ]);
 
   // Separate sections into slots based on template's layout
   // Preserve manual order within each slot
@@ -164,7 +205,7 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
   const mainSections = orderedSections.filter((s) => mainSlotIds.includes(s.id));
   const leftSections = orderedSections.filter((s) => leftSlotIds.includes(s.id));
   const rightSections = orderedSections.filter((s) => rightSlotIds.includes(s.id));
-  
+
   // Custom sections: place them after the last section of their type
   // For Essential Pro, custom sections go to left column (after notes)
   const customSections = orderedSections.filter((s) => s.custom && s.visible);
@@ -175,7 +216,9 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
         <div className="h-full rounded-xl border border-white/40 bg-white/80 shadow-inner p-4">
           <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-slate-500">
             <span>Invoice</span>
-            <span className="rounded-full bg-amber-100 text-amber-700 px-2 py-1 text-[10px] font-semibold">Pro</span>
+            <span className="rounded-full bg-amber-100 text-amber-700 px-2 py-1 text-[10px] font-semibold">
+              Pro
+            </span>
           </div>
           <div className="mt-3 space-y-2">
             <div className="h-2 w-2/3 rounded-full bg-slate-300" />
@@ -194,14 +237,19 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
 
   if (modalPreview) {
     return (
-      <div className="h-full w-full bg-white text-[#111111] flex flex-col" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <div
+        className="h-full w-full bg-white text-[#111111] flex flex-col"
+        style={{ fontFamily: "Inter, system-ui, sans-serif" }}
+      >
         {/* Main sections (header, items) */}
         {mainSections.map((section) => {
           if (!section.visible) return null;
           if (section.custom) {
             return (
               <div key={section.id} className="border-t border-[#EAEAEA] px-12 py-6 bg-[#F8F9FA]">
-                <h3 className="text-[13px] font-semibold mb-2 text-[#666666] uppercase tracking-wide">{section.title}</h3>
+                <h3 className="text-[13px] font-semibold mb-2 text-[#666666] uppercase tracking-wide">
+                  {section.title}
+                </h3>
                 {section.items && section.items.length > 0 ? (
                   <table className="w-full text-[13px]">
                     <tbody>
@@ -214,7 +262,9 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
                     </tbody>
                   </table>
                 ) : (
-                  <p className="text-[14px] text-[#111111] leading-relaxed whitespace-pre-line">{section.content}</p>
+                  <p className="text-[14px] text-[#111111] leading-relaxed whitespace-pre-line">
+                    {section.content}
+                  </p>
                 )}
               </div>
             );
@@ -231,21 +281,30 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
                 if (!section.visible) return null;
                 if (section.custom) {
                   return (
-                    <div key={section.id} className="px-12 py-8 bg-[#F8F9FA] border-b border-[#EAEAEA]">
-                      <h3 className="text-[13px] font-semibold mb-2 text-[#666666] uppercase tracking-wide">{section.title}</h3>
+                    <div
+                      key={section.id}
+                      className="px-12 py-8 bg-[#F8F9FA] border-b border-[#EAEAEA]"
+                    >
+                      <h3 className="text-[13px] font-semibold mb-2 text-[#666666] uppercase tracking-wide">
+                        {section.title}
+                      </h3>
                       {section.items && section.items.length > 0 ? (
                         <table className="w-full text-[13px]">
                           <tbody>
                             {section.items.map((row, idx) => (
                               <tr key={idx} className="border-b border-[#EAEAEA]/60">
-                                <td className="py-2 pr-4 font-semibold text-[#444444]">{row.label}</td>
+                                <td className="py-2 pr-4 font-semibold text-[#444444]">
+                                  {row.label}
+                                </td>
                                 <td className="py-2 text-right text-[#111111]">{row.value}</td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       ) : (
-                        <p className="text-[14px] text-[#111111] leading-relaxed whitespace-pre-line">{section.content}</p>
+                        <p className="text-[14px] text-[#111111] leading-relaxed whitespace-pre-line">
+                          {section.content}
+                        </p>
                       )}
                     </div>
                   );
@@ -261,20 +320,26 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
                 if (section.custom) {
                   return (
                     <div key={section.id} className="px-12 py-8 border-b border-[#EAEAEA]">
-                      <h3 className="text-[13px] font-semibold mb-2 text-[#666666] uppercase tracking-wide">{section.title}</h3>
+                      <h3 className="text-[13px] font-semibold mb-2 text-[#666666] uppercase tracking-wide">
+                        {section.title}
+                      </h3>
                       {section.items && section.items.length > 0 ? (
                         <table className="w-full text-[13px]">
                           <tbody>
                             {section.items.map((row, idx) => (
                               <tr key={idx} className="border-b border-[#EAEAEA]/60">
-                                <td className="py-2 pr-4 font-semibold text-[#444444]">{row.label}</td>
+                                <td className="py-2 pr-4 font-semibold text-[#444444]">
+                                  {row.label}
+                                </td>
                                 <td className="py-2 text-right text-[#111111]">{row.value}</td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       ) : (
-                        <p className="text-[14px] text-[#111111] leading-relaxed whitespace-pre-line">{section.content}</p>
+                        <p className="text-[14px] text-[#111111] leading-relaxed whitespace-pre-line">
+                          {section.content}
+                        </p>
                       )}
                     </div>
                   );
@@ -321,7 +386,9 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
                 <tr key={idx} className="border-b border-slate-100">
                   <td className="py-4">
                     <div className="flex items-center gap-2">
-                      <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded">Service</span>
+                      <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded">
+                        Service
+                      </span>
                       <span>{item.name}</span>
                     </div>
                   </td>
@@ -353,4 +420,3 @@ export function EssentialPro({ preview = false, modalPreview = false, mockData, 
     </div>
   );
 }
-

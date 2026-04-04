@@ -4,37 +4,11 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
+import { clientCreateSchema } from "@/lib/api-schemas";
+import { assertLimit } from "@/lib/usage";
+import { serializeEntitlementError } from "@/lib/entitlements";
 import { z } from "zod";
-
-const createClientSchema = z.object({
-  name: z.string().min(1, "Name is required").max(255),
-  email: z.email().optional().or(z.literal("")),
-  company: z.string().max(255).optional(),
-  phone: z.string().max(50).optional(),
-  whatsapp: z.string().max(50).optional(),
-  businessType: z.string().max(100).optional(),
-  tags: z.string().max(500).optional(), // stored as comma-separated string in DB
-  categoryTags: z.string().max(500).optional(),
-  preferredPaymentMethod: z.string().max(100).optional(),
-  paymentTerms: z.string().max(100).optional(),
-  taxId: z.string().max(100).optional(),
-  lateFeeRules: z.any().optional(),
-  reminderChannel: z.string().max(50).optional(),
-  tonePreference: z.string().max(50).optional(),
-  escalationRule: z.string().max(100).optional(),
-  timezone: z.string().max(100).optional(),
-  currency: z.string().length(3).optional(),
-  preferredCurrency: z.string().length(3).optional(),
-  addressLine1: z.string().max(255).optional(),
-  addressLine2: z.string().max(255).optional(),
-  city: z.string().max(100).optional(),
-  state: z.string().max(100).optional(),
-  country: z.string().max(100).optional(),
-  postalCode: z.string().max(20).optional(),
-  notes: z.string().max(5000).optional(),
-  internalNotes: z.string().max(5000).optional(),
-});
 
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
@@ -100,73 +74,44 @@ export async function POST(req: Request) {
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
-
-  const raw = await req.json();
-  const parsed = createClientSchema.safeParse(raw);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
-      { status: 400 }
-    );
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const {
-    name,
-    email,
-    company,
-    phone,
-    whatsapp,
-    businessType,
-    tags,
-    categoryTags,
-    preferredPaymentMethod,
-    paymentTerms,
-    taxId,
-    lateFeeRules,
-    reminderChannel,
-    tonePreference,
-    escalationRule,
-    timezone,
-    currency,
-    preferredCurrency,
-    addressLine1,
-    addressLine2,
-    city,
-    state,
-    country,
-    postalCode,
-    notes,
-    internalNotes,
-  } = parsed.data;
+  // Check Limit
+  try {
+    await assertLimit(workspace.id, session.user.id, "clients");
+  } catch (error: any) {
+    const serialized = serializeEntitlementError(error);
+    if (serialized) {
+      return NextResponse.json(serialized.body, { status: serialized.status });
+    }
+    return NextResponse.json({ error: error.message }, { status: 402 });
+  }
+
+  // Validate input with Zod (sanitizes strings automatically)
+  const body = await req.json();
+  let validated;
+  try {
+    validated = clientCreateSchema.parse(body);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const firstError = error.issues[0];
+      return NextResponse.json(
+        { error: firstError.message, field: firstError.path[0] },
+        { status: 422 }
+      );
+    }
+    return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+  }
 
   const client = await prisma.client.create({
     data: {
-      name,
-      email,
-      company,
-      phone,
-      whatsapp,
-      businessType,
-      tags,
-      categoryTags,
-      preferredPaymentMethod,
-      paymentTerms,
-      taxId,
-      lateFeeRules,
-      reminderChannel,
-      tonePreference,
-      escalationRule,
-      timezone,
-      currency,
-      preferredCurrency,
-      addressLine1,
-      addressLine2,
-      city,
-      state,
-      country,
-      postalCode,
-      notes,
-      internalNotes,
+      ...validated,
       workspaceId: workspace.id,
     },
   });

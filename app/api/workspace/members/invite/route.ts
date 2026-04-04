@@ -2,33 +2,65 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import crypto from "crypto";
+import { assertLimit } from "@/lib/usage";
+import { ensureActiveWorkspace } from "@/lib/workspace";
+import { generateToken, hashToken } from "@/lib/auth-tokens";
+import { serializeEntitlementError } from "@/lib/entitlements";
+
+const VALID_ROLES = new Set(["OWNER", "ADMIN", "MEMBER", "VIEWER"]);
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email || !session.user.workspaceId) {
+  if (!session?.user?.email || !session.user.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const activeWorkspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+  const workspaceId = activeWorkspace?.id;
+  if (!workspaceId) {
+    return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
 
   const workspace = await prisma.workspace.findUnique({
-    where: { id: session.user.workspaceId },
-    select: { id: true, ownerId: true },
+    where: { id: workspaceId },
+    select: { id: true, createdById: true }, // Changed ownerId to createdById (Schema Refactor)
   });
 
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
 
-  if (workspace.ownerId !== session.user.id) {
-    return NextResponse.json({ error: "Only owners can invite members" }, { status: 403 });
+  // Permission check (using createdById as Owner proxy, or robust Permission helper)
+  // Logic: Owner or Admin. For now, strict Owner check.
+  // Note: Schema migration preserved ownerId in 'legacyOwnerWorkspaces' but new tracking is 'createdById' or Membership Role.
+  // Ideally, check Membership Role:
+  const membership = await prisma.workspaceMember.findFirst({
+    where: { workspaceId, userId: session.user.id, removedAt: null },
+  });
+
+  if (membership?.role !== "OWNER" && membership?.role !== "ADMIN") {
+    return NextResponse.json({ error: "Only owners/admins can invite members" }, { status: 403 });
+  }
+
+  // Check Limit (Gating)
+  try {
+    await assertLimit(workspace.id, session.user.id, "members");
+  } catch (error: any) {
+    const serialized = serializeEntitlementError(error);
+    if (serialized) {
+      return NextResponse.json(serialized.body, { status: serialized.status });
+    }
+    return NextResponse.json({ error: error.message }, { status: 402 });
   }
 
   const body = await req.json();
   const email = body?.email?.toLowerCase().trim();
-  const role = body?.role || "viewer";
+  const role = typeof body?.role === "string" ? body.role.toUpperCase() : "MEMBER";
 
   if (!email) {
     return NextResponse.json({ error: "Email is required" }, { status: 400 });
+  }
+  if (!VALID_ROLES.has(role)) {
+    return NextResponse.json({ error: "Invalid role" }, { status: 422 });
   }
 
   const existingMember = await prisma.workspaceMember.findFirst({
@@ -48,14 +80,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invite already sent" }, { status: 409 });
   }
 
-  const token = crypto.randomBytes(32).toString("hex");
+  const tokenHash = hashToken(generateToken());
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
 
   await prisma.workspaceInvite.create({
     data: {
       email,
-      role,
-      token,
+      role: role as "OWNER" | "ADMIN" | "MEMBER" | "VIEWER",
+      tokenHash,
       workspaceId: workspace.id,
       invitedById: session.user.id,
       expiresAt,

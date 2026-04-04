@@ -94,16 +94,13 @@ export const CanvasPreview = memo(function CanvasPreview({
     const defaultRate = taxSettings.defaultRate || 0;
     const isInclusive = taxSettings.inclusive;
 
-    // Use integer (paise) arithmetic to avoid floating-point accumulation errors.
-    // All values are multiplied by 100 before arithmetic and divided by 100 at the end.
+    // Use integer paise arithmetic to avoid float accumulation errors (0.1 + 0.2 !== 0.3)
     const SCALE = 100;
     let subtotalPaise = 0;
     let taxPaise = 0;
 
     formState.items.forEach((item) => {
-      const qty = Math.round((item.quantity || 0) * SCALE);
-      const price = Math.round((item.unitPrice || 0) * SCALE);
-      const linePaise = Math.round((qty * price) / SCALE); // qty×price in paise²→paise
+      const linePaise = Math.round((item.quantity || 0) * (item.unitPrice || 0) * SCALE);
       const itemTaxRate = item.taxRate ?? defaultRate;
 
       if (isInclusive && itemTaxRate > 0) {
@@ -112,11 +109,12 @@ export const CanvasPreview = memo(function CanvasPreview({
         taxPaise += linePaise - basePaise;
       } else {
         subtotalPaise += linePaise;
-        taxPaise += Math.round((linePaise * itemTaxRate) / SCALE);
+        taxPaise += Math.round((linePaise * itemTaxRate) / 100);
       }
     });
 
     const subtotal = subtotalPaise / SCALE;
+    const tax = taxPaise / SCALE;
 
     const discountTotal =
       formState.adjustments
@@ -140,14 +138,13 @@ export const CanvasPreview = memo(function CanvasPreview({
           return sum + base;
         }, 0) || 0;
 
-    const tax = taxPaise / SCALE;
     const total = subtotal + tax - discountTotal + feeTotal;
 
     return { subtotal, tax, discountTotal, feeTotal, total };
   }, [formState.items, formState.adjustments, formState.taxSettings]);
 
   const currency = formState.currency || "INR";
-  const fmt = (amount: number) => {
+  const fmtCurrency = (amount: number) => {
     try {
       return new Intl.NumberFormat(undefined, {
         style: "currency",
@@ -190,13 +187,17 @@ export const CanvasPreview = memo(function CanvasPreview({
     taxLabel: formState.taxLabel || "Tax",
     extraSummaryLabel: formState.extraSummaryLabel,
     extraSummaryValue: formState.extraSummaryValue,
-    total: fmt(totals.total),
-    subtotal: fmt(totals.subtotal),
-    tax: fmt(totals.tax),
-    discount: totals.discountTotal ? fmt(totals.discountTotal) : undefined,
-    fee: totals.feeTotal ? fmt(totals.feeTotal) : undefined,
+    total: fmtCurrency(totals.total),
+    subtotal: fmtCurrency(totals.subtotal),
+    tax: fmtCurrency(totals.tax),
+    discount: totals.discountTotal ? fmtCurrency(totals.discountTotal) : undefined,
+    fee: totals.feeTotal ? fmtCurrency(totals.feeTotal) : undefined,
     notes: formState.notes,
     paymentTerms: formState.terms,
+    paymentMethod: formState.paymentMethod,
+    paymentInstructions: formState.paymentInstructions,
+    paymentLinkUrl: formState.paymentLinkUrl,
+    allowPartialPayments: formState.allowPartialPayments,
     reminderCadence: formState.reminderCadence,
     signatureUrl: formState.signatureUrl,
     items: formState.items.map((item: any) => ({
@@ -207,7 +208,7 @@ export const CanvasPreview = memo(function CanvasPreview({
       unit: item.unit || "nos",
       rate: item.unitPrice || 0,
       hsnCode: item.hsnCode,
-      amount: fmt((item.quantity || 0) * (item.unitPrice || 0)),
+      amount: fmtCurrency((item.quantity || 0) * (item.unitPrice || 0)),
     })),
   };
 
@@ -223,9 +224,9 @@ export const CanvasPreview = memo(function CanvasPreview({
     }
     if (visibilityMap.items === false) {
       mockData.items = [];
-      mockData.subtotal = fmt(0);
-      mockData.tax = fmt(0);
-      mockData.total = fmt(0);
+      mockData.subtotal = "₹0";
+      mockData.tax = "₹0";
+      mockData.total = "₹0";
     }
     if (visibilityMap.summary === false) {
       mockData.subtotal = "";
@@ -239,6 +240,9 @@ export const CanvasPreview = memo(function CanvasPreview({
     }
     if (visibilityMap.payment === false) {
       mockData.paymentTerms = "";
+      mockData.paymentMethod = "";
+      mockData.paymentInstructions = "";
+      mockData.paymentLinkUrl = "";
     }
   }
 

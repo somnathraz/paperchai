@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { ensureActiveWorkspace } from "@/lib/workspace";
 import { cookies } from "next/headers";
 
 export async function DELETE(req: Request) {
@@ -15,17 +16,26 @@ export async function DELETE(req: Request) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      include: { activeWorkspace: true },
     });
 
-    if (!user || !user.activeWorkspace) {
-      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+    const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
+
+    if (!user || !workspace) {
+      return NextResponse.json({ error: "Workspace or User not found" }, { status: 404 });
     }
 
-    const workspace = user.activeWorkspace;
+    // Check if user is workspace owner (supports both legacy ownerId and member role owner).
+    const ownerMembership = await prisma.workspaceMember.findFirst({
+      where: {
+        workspaceId: workspace.id,
+        userId: session.user.id,
+        removedAt: null,
+        role: "OWNER",
+      },
+      select: { id: true },
+    });
 
-    // Check if user is workspace owner
-    if (workspace.ownerId !== user.id) {
+    if (workspace.ownerId !== session.user.id && !ownerMembership) {
       return NextResponse.json(
         { error: "Only workspace owner can delete workspace" },
         { status: 403 }
@@ -44,14 +54,19 @@ export async function DELETE(req: Request) {
     });
 
     // Clear active workspace cookie
-    const jar = await cookies();
-    jar.delete("paperchai_workspace");
+    const cookieStore = await cookies();
+    cookieStore.delete("paperchai_workspace");
 
     // Update user's activeWorkspaceId if it was this workspace
     if (user.activeWorkspaceId === workspace.id) {
       // Find another workspace for the user
       const otherMembership = await prisma.workspaceMember.findFirst({
-        where: { userId: user.id, workspaceId: { not: workspace.id } },
+        where: {
+          userId: user.id,
+          workspaceId: { not: workspace.id },
+          removedAt: null,
+          workspace: { deletedAt: null },
+        },
         include: { workspace: true },
       });
 
@@ -60,7 +75,8 @@ export async function DELETE(req: Request) {
           where: { id: user.id },
           data: { activeWorkspaceId: otherMembership.workspaceId },
         });
-        jar.set("paperchai_workspace", otherMembership.workspaceId, {
+        const cookieStore = await cookies();
+        cookieStore.set("paperchai_workspace", otherMembership.workspaceId, {
           httpOnly: true,
           path: "/",
         });

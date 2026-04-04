@@ -7,7 +7,20 @@ const nextConfig = {
   // Don't leak Next.js version in response headers
   poweredByHeader: false,
 
-  // Enforce HTTPS via HSTS in production
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "lh3.googleusercontent.com",
+      },
+      {
+        protocol: "https",
+        hostname: "*.googleusercontent.com",
+      },
+    ],
+  },
+
+  // Security headers in production
   async headers() {
     if (process.env.NODE_ENV !== "production") return [];
     return [

@@ -3,12 +3,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
-import { sendEmail } from "@/lib/email";
-import { getThemeHtml } from "@/lib/email-themes";
-import { replaceTemplateVariables, TemplateVars } from "@/lib/reminders";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
+import { sendInvoiceEmail } from "@/lib/invoices/send-invoice";
 import { checkIpRateLimit } from "@/lib/rate-limiter";
+import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
+import { prisma } from "@/lib/prisma";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
+import { z } from "zod";
+import { canSendInvoiceStatus, isValidInvoiceDateOrder } from "@/lib/invoices/workflow-validation";
+
+const reminderSettingsSchema = z.object({
+  startDaysBefore: z.number().int().min(0).max(365).optional(),
+  followUpDays: z.number().int().min(1).max(90),
+  maxReminders: z.number().int().min(1).max(20),
+  channels: z
+    .array(z.enum(["email", "whatsapp", "both"]))
+    .max(3)
+    .optional(),
+  tone: z.string().max(50).optional(),
+  autoStopOnPayment: z.boolean().optional(),
+});
+
+const sendInvoiceSchema = z.object({
+  invoiceId: z.string().cuid(),
+  channel: z.enum(["email", "whatsapp", "both"]).optional().default("email"),
+  recipientEmail: z.string().email().max(254).optional(),
+  idempotencyKey: z.string().min(8).max(128).optional(),
+  notes: z.string().max(5000).optional(),
+  automationEnabled: z.boolean().optional().default(false),
+  reminderSettings: reminderSettingsSchema.optional(),
+});
 
 export async function POST(req: NextRequest) {
   const rl = checkIpRateLimit(req);
@@ -21,183 +45,227 @@ export async function POST(req: NextRequest) {
 
   const workspace = await ensureActiveWorkspace(session.user.id, session.user.name);
   if (!workspace) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
-  const body = await req.json();
-  const {
-    invoiceId,
-    channel = "email",
-    templateSlug,
-    notes,
-    automationEnabled,
-    reminderSettings,
-  } = body;
+  // Rate limiting - 20 emails per hour per workspace
+  const rateCheck = await checkRateLimitByProfile(req, "emailSend", workspace.id);
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { error: "Too many emails sent. Please try again later." },
+      { status: 429 }
+    );
+  }
 
-  if (!invoiceId) {
-    return NextResponse.json({ error: "invoiceId required" }, { status: 400 });
+  let invoiceId: string;
+  let channel: "email" | "whatsapp" | "both";
+  let recipientEmail: string | undefined;
+  let idempotencyKey: string | undefined;
+  let notes: string | undefined;
+  let automationEnabled: boolean;
+  let reminderSettings: z.infer<typeof reminderSettingsSchema> | undefined;
+  try {
+    const parsed = sendInvoiceSchema.parse(await req.json());
+    invoiceId = parsed.invoiceId;
+    channel = parsed.channel;
+    recipientEmail = parsed.recipientEmail;
+    idempotencyKey = parsed.idempotencyKey;
+    notes = parsed.notes;
+    automationEnabled = parsed.automationEnabled;
+    reminderSettings = parsed.reminderSettings;
+  } catch {
+    return NextResponse.json({ error: "Invalid request payload" }, { status: 422 });
+  }
+
+  // Feature Gate: Reminders
+  if (automationEnabled) {
+    try {
+      await assertWorkspaceFeature(workspace.id, session.user.id, "reminders");
+    } catch (error) {
+      const serialized = serializeEntitlementError(error);
+      if (serialized) {
+        return NextResponse.json(serialized.body, { status: serialized.status });
+      }
+      return NextResponse.json({ error: "Feature unavailable" }, { status: 403 });
+    }
+  }
+
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, workspaceId: workspace.id },
+    select: {
+      id: true,
+      number: true,
+      status: true,
+      issueDate: true,
+      dueDate: true,
+      workspaceId: true,
+      sendMeta: true,
+      client: {
+        select: {
+          email: true,
+        },
+      },
+    },
+  });
+  if (!invoice) {
+    return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+  }
+  if (!canSendInvoiceStatus(invoice.status)) {
+    return NextResponse.json(
+      { error: `Cannot send invoice in '${invoice.status}' status` },
+      { status: 409 }
+    );
+  }
+  if (!invoice.dueDate) {
+    return NextResponse.json({ error: "Due date is required before sending" }, { status: 422 });
+  }
+  if (!isValidInvoiceDateOrder(invoice.issueDate, invoice.dueDate)) {
+    return NextResponse.json(
+      { error: "Due date cannot be earlier than issue date" },
+      { status: 422 }
+    );
+  }
+  if (channel !== "whatsapp" && !recipientEmail && !invoice.client?.email) {
+    return NextResponse.json(
+      { error: "Client email is required for email delivery" },
+      { status: 422 }
+    );
+  }
+  const previousSendMeta = (invoice.sendMeta as Record<string, any> | null) || {};
+  const previousKey = previousSendMeta?.lastSendRequest?.idempotencyKey;
+  if (idempotencyKey && previousKey === idempotencyKey && invoice.status === "sent") {
+    return NextResponse.json({
+      ok: true,
+      idempotentReplay: true,
+      invoice,
+      emailSent: true,
+      sentTo: recipientEmail || invoice.client?.email || null,
+      templateUsed: previousSendMeta?.templateSlug || "default",
+    });
   }
 
   try {
-    // Fetch invoice with client and workspace details
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: invoiceId, workspaceId: workspace.id },
-      include: {
-        client: true,
-        workspace: {
-          include: { owner: true },
-        },
-      },
+    const result = await sendInvoiceEmail({
+      invoiceId,
+      workspaceId: workspace.id,
+      channel,
+      recipientEmail,
+      notes,
+      sendMeta: idempotencyKey
+        ? {
+            lastSendRequest: {
+              idempotencyKey,
+              at: new Date().toISOString(),
+              channel,
+            },
+          }
+        : undefined,
+      approvedBy: session.user.id,
     });
 
-    if (!invoice) {
-      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
-    }
+    // If automation is enabled, create the schedule
+    if (automationEnabled && reminderSettings && result.invoice.dueDate) {
+      console.log("Setting up automation for invoice:", invoiceId);
 
-    if (!invoice.client?.email) {
-      return NextResponse.json(
-        { error: "Client email not found. Please add client email before sending." },
-        { status: 400 }
-      );
-    }
+      const dueDate = new Date(result.invoice.dueDate);
+      const { startDaysBefore, followUpDays, maxReminders, channels, tone, autoStopOnPayment } =
+        reminderSettings;
 
-    // Try to get user's "invoice-send" email template or use default
-    let emailTemplate = await prisma.emailTemplate.findFirst({
-      where: {
-        workspaceId: workspace.id,
-        slug: "invoice-send",
-      },
-    });
-
-    // If no custom template, try workspace's default "initial" or "reminder-initial" template
-    if (!emailTemplate) {
-      emailTemplate = await prisma.emailTemplate.findFirst({
-        where: {
+      // 1. Create/Update Schedule Header
+      const schedule = await prisma.invoiceReminderSchedule.upsert({
+        where: { invoiceId },
+        create: {
+          invoiceId,
           workspaceId: workspace.id,
-          slug: { in: ["reminder-initial", "initial"] },
+          enabled: true,
+          useDefaults: false,
+          createdByUserId: session.user.id,
+        },
+        update: {
+          enabled: true,
+          useDefaults: false,
+          updatedAt: new Date(),
         },
       });
+
+      // 2. Clear existing pending steps
+      await prisma.invoiceReminderStep.deleteMany({
+        where: { scheduleId: schedule.id, status: "PENDING" },
+      });
+
+      // 3. Generate Steps
+      const stepsData = [];
+      let count = 0;
+
+      // Step A: Pre-due or On-due reminder (The "Start" one)
+      // If startDaysBefore is defined, we create this initial step.
+      if (typeof startDaysBefore === "number") {
+        const startAt = new Date(dueDate);
+        startAt.setDate(startAt.getDate() - startDaysBefore);
+
+        // Only schedule if it's in the future (or very close to now)
+        if (startAt.getTime() > Date.now()) {
+          stepsData.push({
+            scheduleId: schedule.id,
+            index: count++,
+            daysBeforeDue: startDaysBefore,
+            daysAfterDue: 0,
+            offsetFromDueInMinutes: -1 * startDaysBefore * 1440,
+            sendAt: startAt,
+            status: "PENDING",
+            emailTemplateId: null, // Use default logic
+          });
+        }
+      }
+
+      // Step B: Follow-ups (Post-due)
+      // Continue until we reach maxReminders
+      let followUpIndex = 1;
+      while (count < maxReminders && followUpDays > 0) {
+        const daysAfter = followUpIndex * followUpDays;
+        const followUpAt = new Date(dueDate);
+        followUpAt.setDate(followUpAt.getDate() + daysAfter);
+
+        stepsData.push({
+          scheduleId: schedule.id,
+          index: count++, // 0-based global index
+          daysBeforeDue: 0,
+          daysAfterDue: daysAfter,
+          offsetFromDueInMinutes: daysAfter * 1440,
+          sendAt: followUpAt,
+          status: "PENDING",
+          emailTemplateId: null,
+        });
+        followUpIndex++;
+      }
+
+      if (stepsData.length > 0) {
+        await prisma.invoiceReminderStep.createMany({
+          data: stepsData,
+        });
+
+        // Also update invoice flags if specific fields exist
+        // The sendInvoiceEmail already updated some meta, but let's ensure db flags
+        await prisma.invoice.update({
+          where: { id: invoiceId },
+          data: { remindersEnabled: true },
+        });
+      }
     }
 
-    // Template variables
-    const formattedAmount = `${invoice.currency} ${Number(invoice.total).toLocaleString()}`;
-    const formattedDueDate = invoice.dueDate
-      ? new Date(invoice.dueDate).toLocaleDateString("en-IN", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        })
-      : "Upon receipt";
-
-    const templateVars: TemplateVars = {
-      clientName: invoice.client.name || "Valued Customer",
-      invoiceId: invoice.number || invoice.id,
-      amount: formattedAmount,
-      dueDate: formattedDueDate,
-      companyName: workspace.name || "Your Company",
-      paymentLink: `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/pay/${invoice.id}`,
-    };
-
-    let emailSubject: string;
-    let emailBody: string;
-    let brandColor = "#0f172a";
-    let theme: "minimal" | "classic" | "modern" | "noir" = "modern";
-    let logoUrl: string | undefined;
-
-    if (emailTemplate) {
-      // Use user's template
-      emailSubject = replaceTemplateVariables(emailTemplate.subject, templateVars);
-      emailBody = replaceTemplateVariables(emailTemplate.body, templateVars);
-      brandColor = emailTemplate.brandColor || "#0f172a";
-      theme = (emailTemplate.theme as typeof theme) || "modern";
-      logoUrl = emailTemplate.logoUrl || undefined;
-    } else {
-      // Use default template
-      emailSubject = `Invoice ${invoice.number} from ${workspace.name}`;
-      emailBody = `Dear {{clientName}},
-
-Please find attached your invoice {{invoiceId}} for {{amount}}.
-
-Due Date: {{dueDate}}
-
-You can view and pay this invoice online:
-{{paymentLink}}
-
-Thank you for your business!
-
-Best regards,
-{{companyName}}`;
-      emailBody = replaceTemplateVariables(emailBody, templateVars);
-    }
-
-    // Generate themed HTML email
-    const themedHtml = getThemeHtml(theme, {
-      subject: emailSubject,
-      body: emailBody,
-      brandColor,
-      logoUrl,
-      ...templateVars,
-    });
-
-    // Send the email
-    console.log(`Sending invoice ${invoice.number}...`);
-    const emailSent = await sendEmail({
-      to: invoice.client.email,
-      subject: emailSubject,
-      html: themedHtml,
-      from: workspace.registeredEmail || undefined,
-    });
-
-    if (!emailSent) {
-      console.error("Email sending failed for invoice:", invoiceId);
-      return NextResponse.json(
-        { error: "Failed to send email. Please check your email configuration." },
-        { status: 500 }
-      );
-    }
-
-    // Update invoice status
-    const updatedInvoice = await prisma.invoice.update({
-      where: { id: invoiceId, workspaceId: workspace.id },
-      data: {
-        status: "sent",
-        lastSentAt: new Date(),
-        deliveryChannel: channel,
-        sendMeta: { templateSlug: emailTemplate?.slug || "default", notes },
-      },
-    });
-
-    // Create reminder history record
-    await prisma.reminderHistory.create({
-      data: {
-        workspaceId: workspace.id,
-        clientId: invoice.clientId,
-        projectId: invoice.projectId,
-        invoiceId: invoice.id,
-        channel,
-        kind: "send",
-        status: "sent",
-        sentAt: new Date(),
-        previewToUser: true,
-        tone: "Warm",
-      },
-    });
-
-    // If automation is enabled, mark it in the invoice or log for now
-    // The actual reminder scheduling is handled by the existing reminder system
-    if (automationEnabled && reminderSettings) {
-      console.log("Reminder automation requested for invoice:", invoiceId, reminderSettings);
-      // Future work: The /api/invoices/[id]/reminders POST endpoint handles
-      // setting up reminder steps. For now, we'll let the user set up reminders
-      // through that endpoint after sending.
-    }
-
-    console.log(`Invoice ${invoice.number} sent successfully`);
+    console.log(`Invoice ${result.invoice.number} sent successfully to ${result.sentTo}`);
 
     return NextResponse.json({
       ok: true,
-      invoice: updatedInvoice,
+      invoice: result.invoice,
       emailSent: true,
-      sentTo: invoice.client.email,
-      templateUsed: emailTemplate?.slug || "default",
+      sentTo: result.sentTo,
+      templateUsed: result.templateUsed,
     });
   } catch (error) {
     console.error("Error sending invoice:", error);

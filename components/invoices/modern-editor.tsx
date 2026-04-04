@@ -1,21 +1,22 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { TemplateSidebar } from "./modern-editor/template-sidebar";
 import { CanvasPreview } from "./modern-editor/canvas-preview";
 import { EditorHeader } from "./modern-editor/editor-header";
+import { SummaryCards } from "./summary-cards";
 import { CreateClientModal, CreateProjectModal } from "./modern-editor/panels";
 import { InvoiceFormState } from "./invoice-form";
 import { InvoiceSection } from "./modern-editor/types";
 import type { AIReviewResult, ReviewIssue, ReviewSuggestion } from "@/lib/ai-review";
+import { invoiceService } from "@/lib/api/services";
 import {
   PropertiesPanelSkeleton,
   SendModalSkeleton,
   AIReviewPanelSkeleton,
   AIPanelSkeleton,
 } from "./modern-editor/loading-skeletons";
-import { DynamicErrorBoundary } from "./modern-editor/DynamicErrorBoundary";
 
 // Dynamic imports for heavy components - reduces initial bundle by ~200KB
 const PropertiesPanel = dynamic(
@@ -53,6 +54,7 @@ type ModernEditorProps = {
   selectedTemplateName?: string | null;
   selectedTemplateTags?: string | undefined;
   initialFormState?: InvoiceFormState;
+  initialInvoiceId?: string;
 };
 
 export function ModernEditor({
@@ -61,6 +63,7 @@ export function ModernEditor({
   selectedTemplateName,
   selectedTemplateTags,
   initialFormState,
+  initialInvoiceId,
 }: ModernEditorProps) {
   // Only classic-gray is available for now, default to it if another template is selected
   const availableTemplate = selectedTemplate === "classic-gray" ? "classic-gray" : "classic-gray";
@@ -72,7 +75,7 @@ export function ModernEditor({
   const [previewMode, setPreviewMode] = useState<"a4" | "mobile" | "full">("a4");
   const [darkMode, setDarkMode] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
-  const [savedInvoiceId, setSavedInvoiceId] = useState<string | undefined>(undefined);
+  const [savedInvoiceId, setSavedInvoiceId] = useState<string | undefined>(initialInvoiceId);
   const [invoiceStatus, setInvoiceStatus] = useState<string | undefined>(undefined);
   const [lastSentAt, setLastSentAt] = useState<string | undefined>(undefined);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -143,13 +146,16 @@ export function ModernEditor({
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [projectToEdit, setProjectToEdit] = useState<any>(null);
   const [sendModalOpen, setSendModalOpen] = useState(false);
+  const [razorpayConfigured, setRazorpayConfigured] = useState(false);
+  const [razorpayLinkLoading, setRazorpayLinkLoading] = useState(false);
 
   useEffect(() => {
     const load = async () => {
-      const [cRes, pRes, settingsRes] = await Promise.all([
+      const [cRes, pRes, settingsRes, workspaceSettingsRes] = await Promise.all([
         fetch("/api/clients/list"),
         fetch("/api/projects/list"),
         fetch("/api/user/settings"),
+        fetch("/api/workspace/settings"),
       ]);
       if (cRes.ok) {
         const data = await cRes.json();
@@ -160,27 +166,33 @@ export function ModernEditor({
         setProjects(data.projects || []);
       }
       // Apply user settings as defaults (only if no initial form state)
-      if (settingsRes.ok && !initialFormState) {
-        const { settings } = await settingsRes.json();
-        if (settings) {
-          setFormState((prev) => ({
-            ...prev,
-            currency: settings.defaultCurrency || prev.currency,
-            notes: settings.defaultNotes || prev.notes,
-            terms: settings.defaultTerms || prev.terms,
-            taxSettings: {
-              inclusive: settings.taxInclusive ?? false,
-              automatic: false,
-              defaultRate: settings.defaultTaxRate ?? 18,
-            },
-            // Apply default tax rate to first item if no tax rate set
-            items: prev.items.map((item) => ({
-              ...item,
-              taxRate: item.taxRate || settings.defaultTaxRate || 0,
-            })),
-          }));
-        }
+      if (!initialFormState) {
+        const [{ settings }, workspaceSettings] = await Promise.all([
+          settingsRes.ok ? settingsRes.json() : Promise.resolve({ settings: null }),
+          workspaceSettingsRes && (workspaceSettingsRes as any).ok
+            ? (workspaceSettingsRes as any).json()
+            : Promise.resolve(null),
+        ]);
+        setFormState((prev) => ({
+          ...prev,
+          currency: settings?.defaultCurrency || prev.currency,
+          notes: settings?.defaultNotes || prev.notes,
+          terms: settings?.defaultTerms || prev.terms,
+          taxSettings: {
+            inclusive: settings?.taxInclusive ?? false,
+            automatic: false,
+            defaultRate: settings?.defaultTaxRate ?? 18,
+          },
+          items: prev.items.map((item) => ({
+            ...item,
+            taxRate: item.taxRate || settings?.defaultTaxRate || 0,
+          })),
+          paymentMethod: workspaceSettings?.defaultPaymentMethod || prev.paymentMethod,
+          paymentInstructions: workspaceSettings?.paymentInstructions || prev.paymentInstructions,
+          paymentLinkUrl: workspaceSettings?.paymentLinkBaseUrl || prev.paymentLinkUrl,
+        }));
       }
+      setRazorpayConfigured(Boolean(process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID));
     };
     load();
   }, [initialFormState]);
@@ -203,92 +215,768 @@ export function ModernEditor({
     }
   }, []);
 
-  const showToast = (type: "success" | "error", message: string) => {
+  const showToast = useCallback((type: "success" | "error", message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 3000);
-  };
+  }, []);
 
-  const validateInvoice = (): string | null => {
-    if (!formState.clientId) return "Select a client before continuing.";
-    const validItems = formState.items.filter(
-      (i) => i.title?.trim() && Number(i.quantity) > 0 && Number(i.unitPrice) > 0
-    );
-    if (validItems.length === 0) return "Add at least one item with a name, quantity, and price.";
-    const total = formState.items.reduce(
-      (sum, i) => sum + Number(i.quantity || 0) * Number(i.unitPrice || 0),
-      0
-    );
-    if (total <= 0) return "Invoice total must be greater than zero.";
-    return null;
-  };
+  const refreshPersistedInvoiceState = useCallback(async () => {
+    if (!savedInvoiceId) return;
+    try {
+      const res = await fetch(`/api/invoices/${savedInvoiceId}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      const invoice = data?.invoice;
+      if (!invoice) return;
 
-  // Helper to populate invoice items from a project
-  const populateItemsFromProject = (project: any) => {
-    const newItems: any[] = [];
-
-    // 1. Billable Items (Fixed/Retainer items)
-    if (project.billableItems && project.billableItems.length > 0) {
-      newItems.push(
-        ...project.billableItems.map((item: any) => ({
-          title: item.title,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          taxRate: 0, // Default, will be overridden by tax settings
-        }))
-      );
-    }
-
-    // 2. Unbilled Milestones (Ready for Invoice)
-    if (project.milestones && project.milestones.length > 0) {
-      newItems.push(
-        ...project.milestones.map((m: any) => ({
-          title: `Milestone: ${m.title}`,
-          description: m.description || undefined,
-          quantity: 1,
-          unitPrice: m.amount / 100, // Convert cents to base unit
-          taxRate: 0,
-        }))
-      );
-    }
-
-    if (newItems.length > 0) {
+      setInvoiceStatus(invoice.status || undefined);
+      setLastSentAt(invoice.lastSentAt || undefined);
       setFormState((prev) => ({
         ...prev,
-        items: newItems,
+        paymentMethod: invoice.paymentMethod || "",
+        paymentInstructions: invoice.paymentInstructions || "",
+        paymentLinkUrl: invoice.paymentLinkUrl || "",
+        allowPartialPayments: Boolean(invoice.allowPartialPayments),
+        amountPaid:
+          typeof invoice.amountPaid === "string"
+            ? Number(invoice.amountPaid)
+            : Number(invoice.amountPaid || 0),
+        paidAt: invoice.paidAt || "",
+        paymentReference: invoice.paymentReference || "",
+        paymentNote: invoice.paymentNote || "",
       }));
-      showToast("success", `Loaded ${newItems.length} item(s) from project`);
-    } else {
-      showToast("error", "No billable items or ready milestones found in this project.");
+    } catch {
+      // Silent refresh; editor should not spam errors during background sync.
     }
-  };
+  }, [savedInvoiceId]);
 
-  const handleClientUpdate = async (
-    clientId: string,
-    data: Partial<{
-      email: string;
-      phone: string;
-      addressLine1: string;
-      addressLine2: string;
-      city: string;
-      state: string;
-      postalCode: string;
-      country: string;
-    }>
-  ) => {
-    const res = await fetch(`/api/clients/${clientId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (res.ok) {
-      // Update local clients state with the new data
-      setClients((prevClients) =>
-        prevClients.map((c) => (c.id === clientId ? { ...c, ...data } : c))
-      );
-    } else {
-      throw new Error("Failed to update client");
+  const selectedClient = useMemo(
+    () => (formState.clientId ? clients.find((c) => c.id === formState.clientId) : undefined),
+    [clients, formState.clientId]
+  );
+
+  const selectedProject = useMemo(
+    () => (formState.projectId ? projects.find((p) => p.id === formState.projectId) : undefined),
+    [projects, formState.projectId]
+  );
+
+  const sendScheduleBlocker = useMemo(() => {
+    if (!formState.clientId) return "Select a client before sending or scheduling.";
+    if (!formState.dueDate) return "Set a due date before sending or scheduling.";
+
+    const dueDate = new Date(formState.dueDate);
+    if (Number.isNaN(dueDate.getTime())) return "Set a valid due date before continuing.";
+
+    if (formState.date) {
+      const issueDate = new Date(formState.date);
+      if (!Number.isNaN(issueDate.getTime()) && dueDate.getTime() < issueDate.getTime()) {
+        return "Due date cannot be earlier than issue date.";
+      }
     }
-  };
+
+    if (invoiceStatus === "paid" || invoiceStatus === "cancelled") {
+      return `Invoice is ${invoiceStatus} and cannot be sent or scheduled.`;
+    }
+
+    return null;
+  }, [formState.clientId, formState.dueDate, formState.date, invoiceStatus]);
+
+  // Helper to populate invoice items from a project
+  const populateItemsFromProject = useCallback(
+    (project: any) => {
+      const newItems: any[] = [];
+
+      // 1. Billable Items (Fixed/Retainer items)
+      if (project.billableItems && project.billableItems.length > 0) {
+        newItems.push(
+          ...project.billableItems.map((item: any) => ({
+            title: item.title,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            taxRate: 0, // Default, will be overridden by tax settings
+          }))
+        );
+      }
+
+      // 2. Unbilled Milestones (Ready for Invoice)
+      if (project.milestones && project.milestones.length > 0) {
+        newItems.push(
+          ...project.milestones.map((m: any) => ({
+            title: `Milestone: ${m.title}`,
+            description: m.description || undefined,
+            quantity: 1,
+            unitPrice: m.amount / 100, // Convert cents to base unit
+            taxRate: 0,
+          }))
+        );
+      }
+
+      if (newItems.length > 0) {
+        setFormState((prev) => ({
+          ...prev,
+          items: newItems,
+        }));
+        showToast("success", `Loaded ${newItems.length} item(s) from project`);
+      } else {
+        showToast("error", "No billable items or ready milestones found in this project.");
+      }
+    },
+    [showToast]
+  );
+
+  const handleClientUpdate = useCallback(
+    async (
+      clientId: string,
+      data: Partial<{
+        email: string;
+        phone: string;
+        addressLine1: string;
+        addressLine2: string;
+        city: string;
+        state: string;
+        postalCode: string;
+        country: string;
+      }>
+    ) => {
+      const res = await fetch(`/api/clients/${clientId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        // Update local clients state with the new data
+        setClients((prevClients) =>
+          prevClients.map((c) => (c.id === clientId ? { ...c, ...data } : c))
+        );
+      } else {
+        throw new Error("Failed to update client");
+      }
+    },
+    []
+  );
+
+  const handleAIReview = useCallback(async () => {
+    setAiReviewOpen(true);
+    setAiReviewLoading(true);
+    try {
+      const res = await fetch("/api/ai-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...formState,
+          items: formState.items,
+          taxSettings: formState.taxSettings,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAiReviewResult(data);
+      } else {
+        showToast("error", "Failed to analyze invoice");
+      }
+    } catch (error) {
+      console.error("AI Review error:", error);
+      showToast("error", "Failed to analyze invoice");
+    } finally {
+      setAiReviewLoading(false);
+    }
+  }, [formState, showToast]);
+
+  const handleSaveDraft = useCallback(async () => {
+    if (!formState.clientId) {
+      showToast("error", "Select a client before saving.");
+      return;
+    }
+    // Auto-generate invoice number if not provided
+    const invoiceData = {
+      ...formState,
+      number: formState.number || `DRAFT-${Date.now()}`,
+      templateSlug: currentTemplate,
+      sections,
+      reminderCadence: formState.reminderCadence,
+      attachments: formState.attachments,
+    };
+
+    const res = await fetch("/api/invoices/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(invoiceData),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const savedId = data.invoice.id;
+
+      setSavedInvoiceId(savedId);
+      setInvoiceStatus(data.invoice.status);
+      setLastSentAt(data.invoice.lastSentAt);
+
+      // Save reminder settings
+      if (formState.remindersEnabled !== undefined) {
+        try {
+          await fetch(`/api/invoices/${savedId}/reminders`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              enabled: formState.remindersEnabled,
+              useDefaults: formState.reminderSchedule?.useDefaults,
+              steps: formState.reminderSchedule?.steps,
+            }),
+          });
+        } catch (err) {
+          console.error("Failed to save reminders", err);
+        }
+      }
+
+      // Update form state with the generated number if it was auto-generated
+      if (!formState.number) {
+        setFormState((prev) => ({ ...prev, number: invoiceData.number }));
+      }
+      showToast("success", "Draft saved successfully");
+    } else {
+      const error = await res.json();
+      showToast("error", error.error || "Failed to save draft");
+    }
+  }, [formState, currentTemplate, sections, showToast]);
+
+  const handleGenerateRazorpayLink = useCallback(async () => {
+    if (!savedInvoiceId) {
+      showToast("error", "Save the invoice before generating a Razorpay link.");
+      return;
+    }
+
+    setRazorpayLinkLoading(true);
+    try {
+      const result = await invoiceService.generateRazorpayPaymentLink(savedInvoiceId);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      const payload = (result.data || {}) as { paymentLinkUrl?: string; reused?: boolean };
+
+      const paymentLinkUrl = payload.paymentLinkUrl;
+      if (paymentLinkUrl) {
+        setFormState((prev) => ({
+          ...prev,
+          paymentMethod: "Razorpay",
+          paymentLinkUrl,
+        }));
+      }
+
+      showToast(
+        "success",
+        payload.reused ? "Razorpay payment link reused" : "Razorpay payment link generated"
+      );
+      await refreshPersistedInvoiceState();
+    } catch (error: any) {
+      showToast("error", error.message || "Failed to generate Razorpay link");
+    } finally {
+      setRazorpayLinkLoading(false);
+    }
+  }, [refreshPersistedInvoiceState, savedInvoiceId, showToast]);
+
+  const handleSchedule = useCallback(
+    async (payload: any) => {
+      if (sendScheduleBlocker) {
+        showToast("error", sendScheduleBlocker);
+        return;
+      }
+      if (invoiceStatus === "sent") {
+        showToast("error", "Invoice already sent. Duplicate scheduling is blocked.");
+        return;
+      }
+      if ((payload.channel === "email" || payload.channel === "both") && !selectedClient?.email) {
+        showToast("error", "Client email is required for email scheduling.");
+        return;
+      }
+      // Auto-generate invoice number if not provided
+      const invoiceData = {
+        ...formState,
+        number: formState.number || `DRAFT-${Date.now()}`,
+        templateSlug: currentTemplate,
+        sections,
+        reminderCadence: formState.reminderCadence,
+        attachments: formState.attachments,
+      };
+
+      let invoiceId = savedInvoiceId;
+      if (!invoiceId) {
+        // Save the invoice first if not already saved
+        const res = await fetch("/api/invoices/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(invoiceData),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          console.log("Save response data:", data);
+          invoiceId = data.invoice?.id;
+          if (!invoiceId) {
+            console.error("Save response missing invoice ID:", data);
+            showToast("error", "Failed to get invoice ID after saving.");
+            return;
+          }
+          console.log("Invoice ID obtained:", invoiceId);
+          setSavedInvoiceId(invoiceId);
+          // Update form state with the generated number if it was auto-generated
+          if (!formState.number) {
+            setFormState((prev) => ({ ...prev, number: invoiceData.number }));
+          }
+        } else {
+          const errorText = await res.text();
+          let error;
+          try {
+            error = JSON.parse(errorText);
+          } catch {
+            error = { error: errorText || "Unknown error" };
+          }
+          console.error("Save error:", error);
+          showToast("error", error.error || "Failed to save invoice before scheduling.");
+          return;
+        }
+      }
+
+      // Ensure we have an invoiceId before scheduling
+      if (!invoiceId) {
+        showToast("error", "Invoice ID is missing. Please save the invoice first.");
+        return;
+      }
+
+      // Validate that we have all required fields
+      if (!payload.when) {
+        showToast("error", "Select a date and time for scheduling.");
+        return;
+      }
+
+      // Now schedule the invoice
+      const schedulePayload = {
+        invoiceId,
+        scheduledSendAt: payload.when,
+        channel: payload.channel || "email",
+        templateSlug: currentTemplate,
+        reminderCadence: formState.reminderCadence,
+      };
+
+      console.log("Scheduling with payload:", schedulePayload);
+
+      const scheduleRes = await fetch("/api/invoices/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(schedulePayload),
+      });
+
+      if (scheduleRes.ok) {
+        setInvoiceStatus("scheduled");
+        showToast("success", "Invoice scheduled successfully");
+      } else {
+        const error = await scheduleRes.json().catch(() => ({}));
+        showToast("error", error.error || "Failed to schedule invoice.");
+      }
+    },
+    [
+      formState,
+      currentTemplate,
+      sections,
+      savedInvoiceId,
+      sendScheduleBlocker,
+      invoiceStatus,
+      selectedClient?.email,
+      showToast,
+    ]
+  );
+
+  const handleSend = useCallback(
+    async (payload: any) => {
+      if (sendScheduleBlocker) {
+        showToast("error", sendScheduleBlocker);
+        return;
+      }
+      if (invoiceStatus === "sent") {
+        showToast("error", "Invoice already sent.");
+        return;
+      }
+      if ((payload.channel === "email" || payload.channel === "both") && !selectedClient?.email) {
+        showToast("error", "Client email is required for email delivery.");
+        return;
+      }
+      let invoiceId = savedInvoiceId;
+      if (!invoiceId) {
+        const res = await fetch("/api/invoices/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...formState,
+            number: formState.number || `DRAFT-${Date.now()}`,
+            templateSlug: currentTemplate,
+            sections,
+            reminderCadence: formState.reminderCadence,
+            attachments: formState.attachments,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          invoiceId = data.invoice.id;
+          setSavedInvoiceId(invoiceId);
+        } else {
+          showToast("error", "Failed to save invoice before sending.");
+          return;
+        }
+      }
+      const sendRes = await fetch("/api/invoices/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceId,
+          channel: payload.channel,
+          idempotencyKey:
+            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        }),
+      });
+
+      if (sendRes.ok) {
+        const data = await sendRes.json();
+        if (data.invoice) {
+          setInvoiceStatus(data.invoice.status);
+          setLastSentAt(data.invoice.lastSentAt);
+        }
+        showToast("success", "Invoice sent");
+      } else {
+        const error = await sendRes.json().catch(() => ({}));
+        showToast("error", error.error || "Failed to send invoice");
+      }
+    },
+    [
+      formState,
+      savedInvoiceId,
+      sendScheduleBlocker,
+      invoiceStatus,
+      selectedClient?.email,
+      currentTemplate,
+      sections,
+      showToast,
+    ]
+  );
+
+  const handleOpenSendModal = useCallback(() => {
+    if (sendScheduleBlocker) {
+      showToast("error", sendScheduleBlocker);
+      return;
+    }
+    if (invoiceStatus === "sent") {
+      showToast("error", "Invoice already sent.");
+      return;
+    }
+    setSendModalOpen(true);
+  }, [sendScheduleBlocker, invoiceStatus, showToast]);
+
+  const handleFormStateChange = useCallback(
+    (newState: InvoiceFormState) => {
+      // Logic to reset sent status if key fields change (creating a new invoice context)
+      if (lastSentAt || invoiceStatus === "sent") {
+        if (
+          newState.clientId !== formState.clientId ||
+          newState.projectId !== formState.projectId
+        ) {
+          setSavedInvoiceId(undefined);
+          setInvoiceStatus(undefined);
+          setLastSentAt(undefined);
+          showToast("success", "Started new invoice");
+        }
+      }
+      setFormState(newState);
+    },
+    [formState.clientId, formState.projectId, lastSentAt, invoiceStatus, showToast]
+  );
+
+  const handleSendInvoiceFromModal = useCallback(
+    async (options: any) => {
+      if (sendScheduleBlocker) {
+        showToast("error", sendScheduleBlocker);
+        return;
+      }
+      if (invoiceStatus === "sent") {
+        showToast("error", "Invoice already sent.");
+        return;
+      }
+      if (
+        (options.channel === "email" || options.channel === "both") &&
+        !selectedClient?.email &&
+        !options.recipientEmail
+      ) {
+        showToast("error", "Recipient email is required for email delivery.");
+        return;
+      }
+      let invoiceId = savedInvoiceId;
+      if (!invoiceId) {
+        const res = await fetch("/api/invoices/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...formState,
+            number: formState.number || `DRAFT-${Date.now()}`,
+            templateSlug: currentTemplate,
+            sections,
+            reminderCadence: formState.reminderCadence,
+            attachments: formState.attachments,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          invoiceId = data.invoice.id;
+          setSavedInvoiceId(invoiceId);
+        } else {
+          showToast("error", "Failed to save invoice before sending.");
+          return;
+        }
+      }
+
+      // Send the invoice
+      const sendRes = await fetch("/api/invoices/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceId,
+          channel: options.channel,
+          recipientEmail: options.recipientEmail,
+          idempotencyKey: options.idempotencyKey,
+          automationEnabled: options.automationEnabled,
+          reminderSettings: options.reminderSettings,
+        }),
+      });
+
+      if (sendRes.ok) {
+        const data = await sendRes.json();
+        if (data.invoice) {
+          setInvoiceStatus(data.invoice.status);
+          setLastSentAt(data.invoice.lastSentAt);
+        }
+        showToast("success", "Invoice sent successfully!");
+      } else {
+        const error = await sendRes.json().catch(() => ({}));
+        showToast("error", error.error || "Failed to send invoice.");
+      }
+    },
+    [
+      formState,
+      savedInvoiceId,
+      sendScheduleBlocker,
+      invoiceStatus,
+      selectedClient?.email,
+      currentTemplate,
+      sections,
+      showToast,
+    ]
+  );
+
+  const handleApproveAutomation = useCallback(async () => {
+    if (!savedInvoiceId) {
+      showToast("error", "Save the invoice before approving.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/invoices/${savedInvoiceId}/approve`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        showToast("error", data.error || "Failed to approve invoice.");
+        return;
+      }
+
+      if (data.invoice) {
+        setInvoiceStatus(data.invoice.status);
+        setLastSentAt(data.invoice.lastSentAt);
+      }
+
+      setFormState((prev) => ({
+        ...prev,
+        automationApproval: prev.automationApproval
+          ? {
+              ...prev.automationApproval,
+              status: "APPROVED",
+              approvedAt: new Date().toISOString(),
+              scheduledSendAt:
+                data?.invoice?.scheduledSendAt || prev.automationApproval.scheduledSendAt,
+            }
+          : prev.automationApproval,
+      }));
+
+      if (data.delayed) {
+        showToast("success", "Approved late. Invoice sent immediately.");
+      } else if (data.action === "scheduled") {
+        showToast("success", "Approved. Invoice scheduled.");
+      } else {
+        showToast("success", "Approved and sent.");
+      }
+    } catch (error) {
+      console.error("Failed to approve invoice:", error);
+      showToast("error", "Failed to approve invoice.");
+    }
+  }, [savedInvoiceId, showToast]);
+
+  const handleAIReviewApplyFix = useCallback(
+    (issue: ReviewIssue) => {
+      console.log("Applying fix:", issue);
+      if (issue.autoFix) {
+        const { field, value } = issue.autoFix;
+        console.log("Fix field:", field, "Value:", value);
+
+        if (field === "taxRate") {
+          // Apply tax rate to all items
+          setFormState((prev) => ({
+            ...prev,
+            items: prev.items.map((item) => ({ ...item, taxRate: value })),
+          }));
+        } else if (field === "notes") {
+          setFormState((prev) => ({ ...prev, notes: value }));
+        } else if (field === "terms") {
+          setFormState((prev) => ({ ...prev, terms: value }));
+        } else if (field === "dueDate") {
+          setFormState((prev) => ({ ...prev, dueDate: value }));
+        } else if (field === "currency") {
+          setFormState((prev) => ({ ...prev, currency: value }));
+        } else {
+          // Generic field update
+          setFormState((prev) => ({ ...prev, [field]: value }));
+        }
+        showToast("success", `✓ Applied: ${issue.autoFix.label}`);
+      }
+    },
+    [showToast]
+  );
+
+  const handleAIReviewApplySuggestion = useCallback(
+    (suggestion: ReviewSuggestion) => {
+      console.log("Applying suggestion:", suggestion);
+      if (suggestion.type === "description") {
+        setFormState((prev) => ({
+          ...prev,
+          items: prev.items.map((item) =>
+            item.title?.toLowerCase().trim() === suggestion.original.toLowerCase().trim()
+              ? { ...item, title: suggestion.improved }
+              : item
+          ),
+        }));
+        showToast("success", `Updated: "${suggestion.original}" → "${suggestion.improved}"`);
+      }
+    },
+    [showToast]
+  );
+
+  const handleAIReviewApplyAllFixes = useCallback(() => {
+    console.log("Applying all fixes");
+    if (aiReviewResult) {
+      let fixCount = 0;
+      const updates: Partial<InvoiceFormState> = {};
+      let itemsUpdated = false;
+      let newTaxRate: number | undefined;
+
+      aiReviewResult.issues.forEach((issue) => {
+        if (issue.autoFix) {
+          const { field, value } = issue.autoFix;
+          fixCount++;
+
+          if (field === "taxRate") {
+            newTaxRate = value;
+            itemsUpdated = true;
+          } else if (field === "notes") {
+            updates.notes = value;
+          } else if (field === "terms") {
+            updates.terms = value;
+          } else if (field === "dueDate") {
+            updates.dueDate = value;
+          } else if (field === "currency") {
+            updates.currency = value;
+          }
+        }
+      });
+
+      // Apply all updates in one state change
+      setFormState((prev) => {
+        const newState = { ...prev, ...updates };
+        if (itemsUpdated && newTaxRate !== undefined) {
+          newState.items = prev.items.map((item) => ({ ...item, taxRate: newTaxRate }));
+        }
+        return newState;
+      });
+
+      showToast("success", `✓ Applied ${fixCount} fixes`);
+    }
+  }, [aiReviewResult, showToast]);
+
+  const invoiceTotals = useMemo(() => {
+    const isInclusive = formState.taxSettings?.inclusive === true;
+    const subtotal = (formState.items || []).reduce((sum, item) => {
+      const lineTotal = (item.quantity || 1) * (item.unitPrice || 0);
+      const rate = item.taxRate || 0;
+      return isInclusive && rate > 0 ? sum + lineTotal / (1 + rate / 100) : sum + lineTotal;
+    }, 0);
+    const tax = (formState.items || []).reduce((sum, item) => {
+      const lineTotal = (item.quantity || 1) * (item.unitPrice || 0);
+      const rate = item.taxRate || 0;
+      if (isInclusive && rate > 0) {
+        return sum + (lineTotal - lineTotal / (1 + rate / 100));
+      }
+      return sum + (lineTotal * rate) / 100;
+    }, 0);
+    const discountTotal =
+      (formState.adjustments || [])
+        .filter((adj) => adj.type === "discount")
+        .reduce((sum, adj) => {
+          const base = adj.mode === "percent" ? (adj.value / 100) * subtotal : adj.value;
+          return sum + base;
+        }, 0) || 0;
+    const feeTotal =
+      (formState.adjustments || [])
+        .filter((adj) => adj.type === "fee")
+        .reduce((sum, adj) => {
+          const base = adj.mode === "percent" ? (adj.value / 100) * subtotal : adj.value;
+          return sum + base;
+        }, 0) || 0;
+    const total = subtotal + tax - discountTotal + feeTotal;
+    const amountPaid = Number(formState.amountPaid || 0);
+    const balanceDue = Math.max(0, total - amountPaid);
+    return { subtotal, tax, total, amountPaid, balanceDue };
+  }, [formState.items, formState.taxSettings, formState.adjustments, formState.amountPaid]);
+
+  const scheduleDisabledReason =
+    sendScheduleBlocker ||
+    (invoiceStatus === "sent"
+      ? "Invoice already sent. Create a new revision to schedule again."
+      : undefined);
+  const sendDisabledReason =
+    sendScheduleBlocker ||
+    (invoiceStatus === "sent"
+      ? "Invoice already sent. Create a new revision to send again."
+      : undefined);
+
+  const canSchedule = !scheduleDisabledReason;
+  const canSend = !sendDisabledReason;
+  const approvalStatus = formState.automationApproval?.status;
+  const nextReminderAt = useMemo(() => {
+    const steps = formState.reminderSchedule?.steps || [];
+    const pending = steps
+      .filter((step) => step.status !== "SENT" && step.status !== "SKIPPED")
+      .map((step) => (step.sendAt ? new Date(step.sendAt) : null))
+      .filter((date): date is Date => !!date && !Number.isNaN(date.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime());
+    return pending[0]?.toISOString();
+  }, [formState.reminderSchedule?.steps]);
+
+  useEffect(() => {
+    if (!savedInvoiceId) return;
+
+    void refreshPersistedInvoiceState();
+
+    const onFocus = () => {
+      void refreshPersistedInvoiceState();
+    };
+
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [savedInvoiceId, refreshPersistedInvoiceState]);
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-white">
@@ -299,265 +987,92 @@ export function ModernEditor({
         lastSentAt={lastSentAt}
         hasAutomation={!!(formState.remindersEnabled && formState.reminderSchedule?.steps?.length)}
         templateName={selectedTemplateName || "Classic Gray"}
-        onAIReview={async () => {
-          setAiReviewOpen(true);
-          setAiReviewLoading(true);
-          try {
-            const res = await fetch("/api/ai-review", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                ...formState,
-                items: formState.items,
-                taxSettings: formState.taxSettings,
-              }),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              setAiReviewResult(data);
-            } else {
-              showToast("error", "Failed to analyze invoice");
-            }
-          } catch (error) {
-            console.error("AI Review error:", error);
-            showToast("error", "Failed to analyze invoice");
-          } finally {
-            setAiReviewLoading(false);
-          }
-        }}
+        onAIReview={handleAIReview}
         aiReviewIssueCount={aiReviewResult?.issues.length}
-        onSaveDraft={async () => {
-          const validationError = validateInvoice();
-          if (validationError) {
-            showToast("error", validationError);
-            return;
-          }
-          // Auto-generate invoice number if not provided
-          const invoiceData = {
-            ...formState,
-            number: formState.number || `DRAFT-${Date.now()}`,
-            templateSlug: selectedTemplate,
-            sections,
-            reminderCadence: formState.reminderCadence,
-            attachments: formState.attachments,
-          };
-
-          const res = await fetch("/api/invoices/save", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(invoiceData),
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            const savedId = data.invoice.id;
-
-            setSavedInvoiceId(savedId);
-            setInvoiceStatus(data.invoice.status);
-            setLastSentAt(data.invoice.lastSentAt);
-
-            // Save reminder settings
-            if (formState.remindersEnabled !== undefined) {
-              try {
-                await fetch(`/api/invoices/${savedId}/reminders`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    enabled: formState.remindersEnabled,
-                    useDefaults: formState.reminderSchedule?.useDefaults,
-                    steps: formState.reminderSchedule?.steps,
-                  }),
-                });
-              } catch (err) {
-                console.error("Failed to save reminders", err);
-              }
-            }
-
-            // Update form state with the generated number if it was auto-generated
-            if (!formState.number) {
-              setFormState((prev) => ({ ...prev, number: invoiceData.number }));
-            }
-            showToast("success", "Draft saved successfully");
-          } else {
-            const error = await res.json();
-            showToast("error", error.error || "Failed to save draft");
-          }
-        }}
-        onSchedule={async (payload) => {
-          const validationError = validateInvoice();
-          if (validationError) {
-            showToast("error", validationError);
-            return;
-          }
-          // Auto-generate invoice number if not provided
-          const invoiceData = {
-            ...formState,
-            number: formState.number || `DRAFT-${Date.now()}`,
-            templateSlug: selectedTemplate,
-            sections,
-            reminderCadence: formState.reminderCadence,
-            attachments: formState.attachments,
-          };
-
-          let invoiceId = savedInvoiceId;
-          if (!invoiceId) {
-            // Save the invoice first if not already saved
-            const res = await fetch("/api/invoices/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(invoiceData),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              console.log("Save response data:", data);
-              invoiceId = data.invoice?.id;
-              if (!invoiceId) {
-                console.error("Save response missing invoice ID:", data);
-                showToast("error", "Failed to get invoice ID after saving.");
-                return;
-              }
-              console.log("Invoice ID obtained:", invoiceId);
-              setSavedInvoiceId(invoiceId);
-              // Update form state with the generated number if it was auto-generated
-              if (!formState.number) {
-                setFormState((prev) => ({ ...prev, number: invoiceData.number }));
-              }
-            } else {
-              const errorText = await res.text();
-              let error;
-              try {
-                error = JSON.parse(errorText);
-              } catch {
-                error = { error: errorText || "Unknown error" };
-              }
-              console.error("Save error:", error);
-              showToast("error", error.error || "Failed to save invoice before scheduling.");
-              return;
-            }
-          }
-
-          // Ensure we have an invoiceId before scheduling
-          if (!invoiceId) {
-            showToast("error", "Invoice ID is missing. Please save the invoice first.");
-            return;
-          }
-
-          // Validate that we have all required fields
-          if (!payload.when) {
-            showToast("error", "Select a date and time for scheduling.");
-            return;
-          }
-
-          // Now schedule the invoice
-          const schedulePayload = {
-            invoiceId,
-            scheduledSendAt: payload.when,
-            channel: payload.channel || "email",
-            templateSlug: selectedTemplate,
-            reminderCadence: formState.reminderCadence,
-          };
-
-          console.log("Scheduling with payload:", schedulePayload);
-
-          const scheduleRes = await fetch("/api/invoices/schedule", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(schedulePayload),
-          });
-
-          if (scheduleRes.ok) {
-            showToast("success", "Invoice scheduled successfully");
-          } else {
-            const error = await scheduleRes.json();
-            showToast("error", error.error || "Failed to schedule invoice.");
-          }
-        }}
-        onSend={async (payload) => {
-          if (!formState.clientId) {
-            showToast("error", "Select a client before sending.");
-            return;
-          }
-          let invoiceId = savedInvoiceId;
-          if (!invoiceId) {
-            const res = await fetch("/api/invoices/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(formState),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              invoiceId = data.invoice.id;
-              setSavedInvoiceId(invoiceId);
-            } else {
-              showToast("error", "Failed to save invoice before sending.");
-              return;
-            }
-          }
-          const sendRes = await fetch("/api/invoices/send", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ invoiceId, channel: payload.channel }),
-          });
-
-          if (sendRes.ok) {
-            const data = await sendRes.json();
-            if (data.invoice) {
-              setInvoiceStatus(data.invoice.status);
-              setLastSentAt(data.invoice.lastSentAt);
-            }
-            showToast("success", "Invoice sent");
-          } else {
-            showToast("error", "Failed to send invoice");
-          }
-        }}
-        onOpenSendModal={() => {
-          const validationError = validateInvoice();
-          if (validationError) {
-            showToast("error", validationError);
-            return;
-          }
-          setSendModalOpen(true);
-        }}
+        onSaveDraft={handleSaveDraft}
+        onSchedule={handleSchedule}
+        onSend={handleSend}
+        onOpenSendModal={handleOpenSendModal}
+        canSchedule={canSchedule}
+        scheduleDisabledReason={scheduleDisabledReason}
+        canSend={canSend}
+        sendDisabledReason={sendDisabledReason}
+        approvalStatus={approvalStatus}
+        onApproveAutomation={approvalStatus === "PENDING" ? handleApproveAutomation : undefined}
       />
+
+      {savedInvoiceId ? (
+        <div className="border-b border-border/60 bg-slate-50/70 px-6 py-4">
+          <SummaryCards
+            cards={[
+              {
+                label: "Invoice Total",
+                value: new Intl.NumberFormat("en-IN", {
+                  style: "currency",
+                  currency: formState.currency || "INR",
+                  maximumFractionDigits: 0,
+                }).format(invoiceTotals.total),
+                sub: invoiceStatus ? `Status: ${invoiceStatus}` : "Draft",
+              },
+              {
+                label: "Amount Paid",
+                value: new Intl.NumberFormat("en-IN", {
+                  style: "currency",
+                  currency: formState.currency || "INR",
+                  maximumFractionDigits: 0,
+                }).format(invoiceTotals.amountPaid),
+                sub:
+                  formState.paymentReference && formState.paymentNote
+                    ? `${formState.paymentReference} · ${formState.paymentNote}`
+                    : formState.paymentReference ||
+                      formState.paymentNote ||
+                      "No recorded reference",
+              },
+              {
+                label: "Balance Due",
+                value: new Intl.NumberFormat("en-IN", {
+                  style: "currency",
+                  currency: formState.currency || "INR",
+                  maximumFractionDigits: 0,
+                }).format(invoiceTotals.balanceDue),
+                sub:
+                  invoiceTotals.balanceDue === 0 && invoiceTotals.amountPaid > 0
+                    ? `Fully paid${formState.paidAt ? ` · ${new Date(formState.paidAt).toLocaleDateString("en-IN")}` : ""}`
+                    : formState.allowPartialPayments
+                      ? "Partial payments enabled"
+                      : "Awaiting payment",
+              },
+            ]}
+          />
+        </div>
+      ) : null}
 
       {/* Main layout: Left Properties | Center Canvas | Right Templates Drawer */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Properties Panel (320px, collapsible) */}
-        <DynamicErrorBoundary fallbackLabel="Properties panel failed to load. Please refresh.">
-          <PropertiesPanel
-            formState={formState}
-            onFormStateChange={(newState) => {
-              // Logic to reset sent status if key fields change (creating a new invoice context)
-              if (lastSentAt || invoiceStatus === "sent") {
-                if (
-                  newState.clientId !== formState.clientId ||
-                  newState.projectId !== formState.projectId
-                ) {
-                  setSavedInvoiceId(undefined);
-                  setInvoiceStatus(undefined);
-                  setLastSentAt(undefined);
-                  showToast("success", "Started new invoice");
-                }
-              }
-              setFormState(newState);
-            }}
-            clients={clients}
-            projects={projects}
-            sections={sections}
-            onSectionsChange={setSections}
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-            onWidthChange={setSidebarWidth}
-            onClientUpdate={handleClientUpdate}
-            onCreateClient={() => setCreateClientOpen(true)}
-            onCreateProject={() => setCreateProjectOpen(true)}
-            onProjectSelect={(project) => populateItemsFromProject(project)}
-            onEditProject={(project) => {
-              setProjectToEdit(project);
-              setCreateProjectOpen(true);
-            }}
-          />
-        </DynamicErrorBoundary>
+        <PropertiesPanel
+          formState={formState}
+          onFormStateChange={handleFormStateChange}
+          clients={clients}
+          projects={projects}
+          sections={sections}
+          onSectionsChange={setSections}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          onWidthChange={setSidebarWidth}
+          onClientUpdate={handleClientUpdate}
+          onCreateClient={() => setCreateClientOpen(true)}
+          onCreateProject={() => setCreateProjectOpen(true)}
+          onProjectSelect={(project) => populateItemsFromProject(project)}
+          onEditProject={(project) => {
+            setProjectToEdit(project);
+            setCreateProjectOpen(true);
+          }}
+          onGenerateRazorpayLink={handleGenerateRazorpayLink}
+          razorpayLinkLoading={razorpayLinkLoading}
+          razorpayConfigured={razorpayConfigured}
+          savedInvoiceId={savedInvoiceId}
+        />
 
         {/* Center: Large Canvas Preview (Hero) */}
         <div className="flex-1 overflow-hidden">
@@ -576,12 +1091,8 @@ export function ModernEditor({
             sidebarCollapsed={sidebarCollapsed}
             sidebarWidth={sidebarWidth}
             sections={sections}
-            selectedClient={
-              formState.clientId ? clients.find((c) => c.id === formState.clientId) : undefined
-            }
-            selectedProject={
-              formState.projectId ? projects.find((p) => p.id === formState.projectId) : undefined
-            }
+            selectedClient={selectedClient}
+            selectedProject={selectedProject}
           />
         </div>
 
@@ -599,15 +1110,13 @@ export function ModernEditor({
 
       {/* AI Panel (Bottom) */}
       {aiPanelOpen && (
-        <DynamicErrorBoundary fallbackLabel="AI panel failed to load.">
-          <AIPanel
-            onClose={() => setAiPanelOpen(false)}
-            onGenerate={(data) => {
-              setFormState((prev) => ({ ...prev, ...data }));
-              setAiPanelOpen(false);
-            }}
-          />
-        </DynamicErrorBoundary>
+        <AIPanel
+          onClose={() => setAiPanelOpen(false)}
+          onGenerate={(data) => {
+            setFormState((prev) => ({ ...prev, ...data }));
+            setAiPanelOpen(false);
+          }}
+        />
       )}
 
       {/* AI Button (Floating) */}
@@ -668,22 +1177,9 @@ export function ModernEditor({
         onOpenChange={setSendModalOpen}
         invoice={{
           number: formState.number || "Draft",
-          total:
-            formState.items.reduce(
-              (sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0),
-              0
-            ) *
-            (1 + (formState.taxSettings?.defaultRate || 0) / 100),
-          subtotal: formState.items.reduce(
-            (sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0),
-            0
-          ),
-          tax:
-            formState.items.reduce(
-              (sum, item) => sum + (item.quantity || 1) * (item.unitPrice || 0),
-              0
-            ) *
-            ((formState.taxSettings?.defaultRate || 0) / 100),
+          total: invoiceTotals.total,
+          subtotal: invoiceTotals.subtotal,
+          tax: invoiceTotals.tax,
           dueDate: formState.dueDate ? new Date(formState.dueDate).toISOString() : undefined,
           items: formState.items.map((item) => ({
             name: item.title,
@@ -693,57 +1189,26 @@ export function ModernEditor({
           })),
           currency: formState.currency || "INR",
         }}
-        client={clients.find((c) => c.id === formState.clientId)}
-        project={projects.find((p) => p.id === formState.projectId)}
+        client={selectedClient}
+        project={selectedProject}
         templateName={selectedTemplateName || "Classic Gray"}
         initialAutomationEnabled={
           !!(formState.remindersEnabled && formState.reminderSchedule?.steps?.length)
         }
-        onSend={async (options) => {
-          if (!formState.clientId) {
-            showToast("error", "Select a client before sending.");
-            return;
-          }
-          let invoiceId = savedInvoiceId;
-          if (!invoiceId) {
-            const res = await fetch("/api/invoices/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(formState),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              invoiceId = data.invoice.id;
-              setSavedInvoiceId(invoiceId);
-            } else {
-              showToast("error", "Failed to save invoice before sending.");
-              return;
-            }
-          }
-
-          // Send the invoice
-          const sendRes = await fetch("/api/invoices/send", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              invoiceId,
-              channel: options.channel,
-              automationEnabled: options.automationEnabled,
-              reminderSettings: options.reminderSettings,
-            }),
-          });
-
-          if (sendRes.ok) {
-            const data = await sendRes.json();
-            if (data.invoice) {
-              setInvoiceStatus(data.invoice.status);
-              setLastSentAt(data.invoice.lastSentAt);
-            }
-            showToast("success", "Invoice sent successfully!");
-          } else {
-            showToast("error", "Failed to send invoice.");
-          }
+        automationState={{
+          invoiceStatus,
+          approvalStatus: formState.automationApproval?.status,
+          approvalRequestedAt: formState.automationApproval?.requestedAt,
+          approvedAt: formState.automationApproval?.approvedAt,
+          rejectedAt: formState.automationApproval?.rejectedAt,
+          scheduledSendAt: formState.automationApproval?.scheduledSendAt,
+          lastSentAt,
+          remindersEnabled: formState.remindersEnabled,
+          nextReminderAt,
+          escalationCount: formState.automationApproval?.escalationCount,
+          lastEscalatedAt: formState.automationApproval?.lastEscalatedAt,
         }}
+        onSend={handleSendInvoiceFromModal}
       />
 
       {/* AI Review Panel */}
@@ -752,87 +1217,9 @@ export function ModernEditor({
         onClose={() => setAiReviewOpen(false)}
         reviewResult={aiReviewResult}
         isLoading={aiReviewLoading}
-        onApplyFix={(issue) => {
-          console.log("Applying fix:", issue);
-          if (issue.autoFix) {
-            const { field, value } = issue.autoFix;
-            console.log("Fix field:", field, "Value:", value);
-
-            if (field === "taxRate") {
-              // Apply tax rate to all items
-              setFormState((prev) => ({
-                ...prev,
-                items: prev.items.map((item) => ({ ...item, taxRate: value })),
-              }));
-            } else if (field === "notes") {
-              setFormState((prev) => ({ ...prev, notes: value }));
-            } else if (field === "terms") {
-              setFormState((prev) => ({ ...prev, terms: value }));
-            } else if (field === "dueDate") {
-              setFormState((prev) => ({ ...prev, dueDate: value }));
-            } else if (field === "currency") {
-              setFormState((prev) => ({ ...prev, currency: value }));
-            } else {
-              // Generic field update
-              setFormState((prev) => ({ ...prev, [field]: value }));
-            }
-            showToast("success", `✓ Applied: ${issue.autoFix.label}`);
-          }
-        }}
-        onApplySuggestion={(suggestion) => {
-          console.log("Applying suggestion:", suggestion);
-          if (suggestion.type === "description") {
-            setFormState((prev) => ({
-              ...prev,
-              items: prev.items.map((item) =>
-                item.title?.toLowerCase().trim() === suggestion.original.toLowerCase().trim()
-                  ? { ...item, title: suggestion.improved }
-                  : item
-              ),
-            }));
-            showToast("success", `Updated: "${suggestion.original}" → "${suggestion.improved}"`);
-          }
-        }}
-        onApplyAllFixes={() => {
-          console.log("Applying all fixes");
-          if (aiReviewResult) {
-            let fixCount = 0;
-            const updates: Partial<InvoiceFormState> = {};
-            let itemsUpdated = false;
-            let newTaxRate: number | undefined;
-
-            aiReviewResult.issues.forEach((issue) => {
-              if (issue.autoFix) {
-                const { field, value } = issue.autoFix;
-                fixCount++;
-
-                if (field === "taxRate") {
-                  newTaxRate = value;
-                  itemsUpdated = true;
-                } else if (field === "notes") {
-                  updates.notes = value;
-                } else if (field === "terms") {
-                  updates.terms = value;
-                } else if (field === "dueDate") {
-                  updates.dueDate = value;
-                } else if (field === "currency") {
-                  updates.currency = value;
-                }
-              }
-            });
-
-            // Apply all updates in one state change
-            setFormState((prev) => {
-              const newState = { ...prev, ...updates };
-              if (itemsUpdated && newTaxRate !== undefined) {
-                newState.items = prev.items.map((item) => ({ ...item, taxRate: newTaxRate }));
-              }
-              return newState;
-            });
-
-            showToast("success", `✓ Applied ${fixCount} fixes`);
-          }
-        }}
+        onApplyFix={handleAIReviewApplyFix}
+        onApplySuggestion={handleAIReviewApplySuggestion}
+        onApplyAllFixes={handleAIReviewApplyAllFixes}
       />
     </div>
   );

@@ -2,12 +2,9 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveWorkspace } from "@/lib/workspace";
+import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 
-export async function GET(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -28,7 +25,7 @@ export async function GET(
     include: {
       documents: {
         orderBy: { createdAt: "desc" },
-        take: 20
+        take: 20,
       },
       invoices: {
         orderBy: { createdAt: "desc" },
@@ -65,10 +62,7 @@ export async function GET(
 }
 
 // PATCH - Update client details
-export async function PATCH(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -78,15 +72,35 @@ export async function PATCH(
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
+  const membership = await getWorkspaceMembership(session.user.id, workspace.id);
+  if (!membership) {
+    return NextResponse.json({ error: "Workspace access denied" }, { status: 403 });
+  }
+  if (!canWriteWorkspace(membership.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const { id } = await params;
   const body = await req.json();
 
   // Only allow updating specific fields
   const allowedFields = [
-    'name', 'email', 'phone', 'company', 'contactPerson',
-    'addressLine1', 'addressLine2', 'city', 'state', 'postalCode', 'country',
-    'taxId', 'notes', 'paymentTerms', 'reminderChannel', 'tonePreference'
+    "name",
+    "email",
+    "phone",
+    "company",
+    "contactPerson",
+    "addressLine1",
+    "addressLine2",
+    "city",
+    "state",
+    "postalCode",
+    "country",
+    "taxId",
+    "notes",
+    "paymentTerms",
+    "reminderChannel",
+    "tonePreference",
   ];
 
   const updateData: Record<string, any> = {};
@@ -95,13 +109,24 @@ export async function PATCH(
       updateData[field] = body[field];
     }
   }
+  if (Object.keys(updateData).length === 0) {
+    return NextResponse.json({ error: "No updatable fields provided" }, { status: 400 });
+  }
 
   try {
-    const client = await prisma.client.update({
+    const existing = await prisma.client.findFirst({
       where: {
-        id: id,
+        id,
         workspaceId: workspace.id,
       },
+      select: { id: true },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    }
+
+    const client = await prisma.client.update({
+      where: { id: existing.id },
       data: updateData,
     });
 

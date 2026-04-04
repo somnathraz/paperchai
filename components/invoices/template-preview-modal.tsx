@@ -1,15 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  X,
-  Play,
-  MonitorSmartphone,
-  TabletSmartphone,
-  FileText,
-  Sun,
-  Moon,
-} from "lucide-react";
+import { X, Play, MonitorSmartphone, TabletSmartphone, FileText, Sun, Moon } from "lucide-react";
 import { renderTemplate } from "./templates/registry";
 
 type PreviewView = "a4" | "mobile" | "full";
@@ -40,13 +32,13 @@ function renderPreview(
   if (view === "a4") {
     return (
       <div className="flex w-full justify-center items-center p-8 bg-neutral-100 min-h-full">
-        <div 
+        <div
           className="bg-white overflow-hidden"
-          style={{ 
+          style={{
             width: `${794 * (zoom / 100)}px`,
             height: `${1123 * (zoom / 100)}px`, // A4 height at 96dpi
             maxWidth: "100%",
-            maxHeight: "100%"
+            maxHeight: "100%",
           }}
         >
           {renderTemplate(template.slug, {
@@ -61,7 +53,13 @@ function renderPreview(
               { id: "summary", title: "Summary", visible: true },
               { id: "notes", title: "Notes", visible: true },
               { id: "payment", title: "Payment", visible: true },
-              { id: "custom_demo", title: "Signature", visible: true, custom: true, content: "Authorized signatory" },
+              {
+                id: "custom_demo",
+                title: "Signature",
+                visible: true,
+                custom: true,
+                content: "Authorized signatory",
+              },
             ],
           })}
         </div>
@@ -73,11 +71,11 @@ function renderPreview(
   if (view === "mobile") {
     return (
       <div className="flex w-full justify-center items-center py-6 bg-neutral-100 min-h-full">
-        <div 
+        <div
           className="bg-white overflow-hidden"
-          style={{ 
+          style={{
             width: `${360 * (zoom / 100)}px`,
-            maxWidth: "100%"
+            maxWidth: "100%",
           }}
         >
           {renderTemplate(template.slug, {
@@ -94,12 +92,12 @@ function renderPreview(
   /** FULL BLEED VIEW */
   return (
     <div className="flex w-full justify-center items-center py-4 bg-neutral-100 min-h-full">
-      <div 
+      <div
         className="bg-white overflow-hidden w-full"
-        style={{ 
+        style={{
           maxWidth: "1200px",
           transform: `scale(${zoom / 100})`,
-          transformOrigin: "top center"
+          transformOrigin: "top center",
         }}
       >
         {renderTemplate(template.slug, {
@@ -125,18 +123,15 @@ type TemplatePreviewModalProps = {
   onClose: () => void;
 };
 
-export function TemplatePreviewModal({
-  template,
-  onClose,
-}: TemplatePreviewModalProps) {
+export function TemplatePreviewModal({ template, onClose }: TemplatePreviewModalProps) {
   const tag = template.isPro ? "Pro" : "Free";
   const [view, setView] = useState<PreviewView>("a4");
-   const [zoom, setZoom] = useState<ZoomLevel>(100);
+  const [zoom, setZoom] = useState<ZoomLevel>(100);
   const isDarkDefault = (template.tags || "").toLowerCase().includes("dark");
   const [darkToggle, setDarkToggle] = useState<boolean>(isDarkDefault);
 
   return (
-    <div 
+    <div
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/55 backdrop-blur-[8px] p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
@@ -153,7 +148,7 @@ export function TemplatePreviewModal({
         <X className="h-5 w-5 text-slate-700" />
       </button>
 
-      <div 
+      <div
         className="relative w-full max-w-6xl max-h-[90vh] bg-white rounded-xl shadow-[0_20px_80px_-20px_rgba(0,0,0,0.35)] p-6 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
@@ -163,13 +158,13 @@ export function TemplatePreviewModal({
             <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
               Template Preview
             </p>
-            <h2 className="text-xl font-semibold text-foreground">
-              {template.name}
-            </h2>
+            <h2 className="text-xl font-semibold text-foreground">{template.name}</h2>
           </div>
-          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-            tag === "Pro" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"
-          }`}>
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+              tag === "Pro" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"
+            }`}
+          >
             {tag}
           </span>
         </div>
@@ -218,7 +213,9 @@ export function TemplatePreviewModal({
                 type="button"
                 onClick={() => setZoom(z as ZoomLevel)}
                 className={`rounded px-1.5 py-0.5 text-xs font-medium transition ${
-                  zoom === z ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground"
+                  zoom === z
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {z}%
@@ -235,7 +232,7 @@ export function TemplatePreviewModal({
         {/* FOOTER */}
         <div className="mt-4 flex items-center justify-between pt-4 border-t border-border/60">
           <span className="text-xs text-muted-foreground">
-            {tag === "Pro" ? "Included in Pro · ₹149/mo" : "Free template"}
+            {tag === "Pro" ? "Included in Premium or Premier" : "Free template"}
           </span>
           <a
             href={`/invoices/new?template=${template.slug}`}
