@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
@@ -43,10 +44,13 @@ export default function Header() {
         >
           {/* LOGO */}
           <Link href="/" className="flex items-center gap-2 md:gap-3">
-            <img
-              src="/favicon.png"
-              alt="PaperChai Icon"
-              className="h-8 w-8 md:h-10 md:w-10 rounded-lg md:rounded-xl"
+            <Image
+              src="/logo.png"
+              alt="PaperChai"
+              width={500}
+              height={500}
+              priority
+              className="h-8 w-8 md:h-10 md:w-10 rounded-lg md:rounded-xl object-contain"
             />
             <div className="leading-tight">
               <p className="text-[10px] md:text-[11px] uppercase tracking-[0.16em] md:tracking-[0.18em] text-neutral-500 font-medium">
