@@ -106,6 +106,7 @@ export async function exchangeCodeForToken(code: string): Promise<{
   access_token?: string;
   team?: { id: string; name: string };
   scope?: string;
+  authed_user?: { id: string; scope?: string };
   error?: string;
 }> {
   const clientId = process.env.SLACK_CLIENT_ID;

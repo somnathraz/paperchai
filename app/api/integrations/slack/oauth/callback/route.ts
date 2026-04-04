@@ -145,6 +145,39 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    // 7b. Seed integrationIdentity for the installer so their first command works
+    //     without needing a users.info email lookup.
+    if (tokenResponse.authed_user?.id) {
+      const membership = await prisma.workspaceMember.findFirst({
+        where: { workspaceId: stateData.workspaceId, userId: session.user.id, removedAt: null },
+        select: { role: true },
+      });
+      if (membership) {
+        await prisma.integrationIdentity.upsert({
+          where: {
+            workspaceId_provider_externalUserId: {
+              workspaceId: stateData.workspaceId,
+              provider: "SLACK",
+              externalUserId: tokenResponse.authed_user.id,
+            },
+          },
+          create: {
+            workspaceId: stateData.workspaceId,
+            provider: "SLACK",
+            externalUserId: tokenResponse.authed_user.id,
+            internalUserId: session.user.id,
+            roleSnapshot: membership.role,
+            active: true,
+          },
+          update: {
+            internalUserId: session.user.id,
+            roleSnapshot: membership.role,
+            active: true,
+          },
+        });
+      }
+    }
+
     // 8. Success - redirect to integrations page or custom URL
     const redirectPath = stateData.redirectTo
       ? `${stateData.redirectTo}${stateData.redirectTo.includes("?") ? "&" : "?"}success=slack_connected`
