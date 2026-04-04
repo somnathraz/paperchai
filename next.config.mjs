@@ -1,9 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    instrumentationHook: true,
-  },
-
   // Don't leak Next.js version in response headers
   poweredByHeader: false,
 
