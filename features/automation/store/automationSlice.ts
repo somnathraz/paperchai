@@ -15,6 +15,7 @@ export interface AutomationState {
   activeTab: string;
   isLoading: boolean;
   error: string | null;
+  hasFetched: boolean;
 }
 
 const initialState: AutomationState = {
@@ -23,6 +24,7 @@ const initialState: AutomationState = {
   activeTab: "overview",
   isLoading: false,
   error: null,
+  hasFetched: false,
 };
 
 // Thunks
@@ -71,6 +73,7 @@ const automationSlice = createSlice({
       })
       .addCase(fetchAutomationData.fulfilled, (state, action) => {
         state.isLoading = false;
+        state.hasFetched = true;
         state.stats = action.payload.stats || null;
         state.integrationStatus = action.payload.integrationStatus || null;
         if (action.payload.error) {
@@ -79,6 +82,7 @@ const automationSlice = createSlice({
       })
       .addCase(fetchAutomationData.rejected, (state, action) => {
         state.isLoading = false;
+        state.hasFetched = true;
         state.error = action.payload as string;
       });
   },
