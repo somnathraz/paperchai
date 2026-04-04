@@ -61,7 +61,8 @@ export const PLAN_DEFINITIONS: Record<PlanCode, PlanDefinition> = {
       "Up to 5 clients",
       "10 invoices / month",
       "Basic PDF invoices",
-      "No AI, reminders, or integrations",
+      "1 automation rule to try",
+      "Notion import (10/day) · Slack read-only",
     ],
     pricing: {
       INR: { monthly: 0, yearly: 0 },
@@ -72,10 +73,10 @@ export const PLAN_DEFINITIONS: Record<PlanCode, PlanDefinition> = {
       estimates: true,
       clients: true,
       pdfExport: true,
-      integrations: false,
+      integrations: true, // allow connecting Notion + Slack to try
       ai: false,
       reminders: false,
-      automation: false,
+      automation: true, // 1 rule allowed (enforced by automationRules limit)
       recurringPlans: false,
       approvalWorkflows: false,
       customBranding: false,
@@ -90,11 +91,11 @@ export const PLAN_DEFINITIONS: Record<PlanCode, PlanDefinition> = {
       templates: 1,
       aiCallsPerMonth: 0,
       reminderEmailsPerMonth: 0,
-      automationRules: 0,
+      automationRules: 1, // try one automation
       recurringPlans: 0,
-      integrationsMaxConnections: 0,
-      integrationsImportsPerDay: 0,
-      integrationsImportsPerMinute: 0,
+      integrationsMaxConnections: 2, // one Notion + one Slack
+      integrationsImportsPerDay: 10, // limited Notion imports per day
+      integrationsImportsPerMinute: 2,
       requestsPerMinute: 5,
       maxFileSizeBytes: 5 * 1024 * 1024,
       maxTokens: 10000,
