@@ -579,11 +579,12 @@ export async function POST(request: NextRequest) {
       await assertLimit(connection.workspaceId, actor.internalUserId, "invoicesPerMonth");
     } catch (err) {
       const serialized = serializeEntitlementError(err);
+      const limit = (serialized?.body as { limit?: number } | undefined)?.limit;
       await finalizeCommandEvent(event.id, "REJECTED", command, "Invoice limit reached");
       return NextResponse.json({
         response_type: "ephemeral",
         text: serialized
-          ? `Invoice limit reached for your plan (${serialized.body.limit} invoices/month). Upgrade at paperchai.com/settings/billing.`
+          ? `Invoice limit reached for your plan (${limit ?? "—"} invoices/month). Upgrade at paperchai.com/settings/billing.`
           : "Invoice limit reached. Upgrade your plan to create more invoices.",
       });
     }

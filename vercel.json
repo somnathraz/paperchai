@@ -1,5 +1,29 @@
 {
   "regions": ["bom1"],
+  "functions": {
+    "app/api/internal/cron/daily/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/invoices/[id]/pdf/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "app/api/internal/reminders/run/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/internal/scheduled-invoices/run/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/internal/automation/run/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/internal/approvals/escalate/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/internal/recurring-invoices/run/route.ts": {
+      "maxDuration": 60
+    }
+  },
   "crons": [
     { "path": "/api/internal/cron/daily", "schedule": "0 2 * * *" },
     { "path": "/api/internal/approvals/escalate", "schedule": "0 3 * * *" }
