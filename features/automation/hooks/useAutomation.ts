@@ -8,16 +8,16 @@ import { setActiveTab, clearError, fetchAutomationData } from "../store/automati
 
 export const useAutomation = () => {
   const dispatch = useAppDispatch();
-  const { stats, integrationStatus, activeTab, isLoading, error } = useAppSelector(
+  const { stats, integrationStatus, activeTab, isLoading, error, hasFetched } = useAppSelector(
     (state) => state.automation
   );
 
-  // Initial fetch
+  // Initial fetch — guard with hasFetched to prevent re-firing when stats is null after a failed fetch
   useEffect(() => {
-    if (!stats && !isLoading && !error) {
+    if (!hasFetched && !isLoading) {
       dispatch(fetchAutomationData());
     }
-  }, [dispatch, stats, isLoading, error]);
+  }, [dispatch, hasFetched, isLoading]);
 
   return {
     // State
