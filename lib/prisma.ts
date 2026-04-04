@@ -1,13 +1,13 @@
 import { PrismaClient } from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: ReturnType<typeof createPrismaClient> | undefined
+  prisma: ReturnType<typeof createPrismaClient> | undefined;
 };
 
 const createPrismaClient = () => {
   const connectionString = process.env.DATABASE_URL;
 
-  // If manual connection string is provided, use it. 
+  // If manual connection string is provided, use it.
   // Otherwise let Prisma client read from env("DATABASE_URL") automatically.
   const params: any = {
     log: ["error", "warn"],

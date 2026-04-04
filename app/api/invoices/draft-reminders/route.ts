@@ -73,7 +73,7 @@ function getDraftApprovalEmail(params: {
                             </h1>
                         </td>
                     </tr>
-                    
+
                     <!-- Urgency Banner -->
                     <tr>
                         <td style="background: ${urgencyColor}15; padding: 16px 32px; border-bottom: 1px solid ${urgencyColor}30;">
@@ -82,7 +82,7 @@ function getDraftApprovalEmail(params: {
                             </p>
                         </td>
                     </tr>
-                    
+
                     <!-- Content -->
                     <tr>
                         <td style="padding: 32px;">
@@ -92,7 +92,7 @@ function getDraftApprovalEmail(params: {
                             <p style="margin: 0 0 24px; color: #64748b; line-height: 1.6;">
                                 You have a draft invoice that needs your approval before we can start the payment reminder automation.
                             </p>
-                            
+
                             <!-- Invoice Card -->
                             <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
                                 <table style="width: 100%;">
@@ -122,18 +122,18 @@ function getDraftApprovalEmail(params: {
                                     </tr>
                                 </table>
                             </div>
-                            
+
                             <!-- CTA Button -->
                             <a href="${params.approvalUrl}" style="display: block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; padding: 16px 32px; border-radius: 8px; text-align: center; font-weight: 600; font-size: 16px;">
                                 Review & Approve Invoice →
                             </a>
-                            
+
                             <p style="margin: 24px 0 0; color: #94a3b8; font-size: 13px; text-align: center;">
                                 Once approved, we'll automatically send payment reminders to your client.
                             </p>
                         </td>
                     </tr>
-                    
+
                     <!-- Footer -->
                     <tr>
                         <td style="background: #f8fafc; padding: 24px 32px; border-top: 1px solid #e2e8f0; text-align: center;">

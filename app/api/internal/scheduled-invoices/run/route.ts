@@ -2,9 +2,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { sendInvoiceEmail } from "@/lib/invoices/send-invoice";
 import { logCronEvent } from "@/lib/security/audit-log";
-import { securityConfig } from "@/lib/security/security.config";
 
 const LOCK_MINUTES = 5;
 const RETRY_DELAY_MINUTES = 30;
@@ -13,26 +13,10 @@ const MAX_RETRIES = 3;
 type SendChannel = "email" | "whatsapp" | "both";
 
 export async function POST(req: NextRequest) {
+  const authError = verifyCronSecret(req);
+  if (authError) return authError;
+
   try {
-    const authHeader = req.headers.get("authorization");
-    const cronHeader = req.headers.get(securityConfig.cron.secretHeader);
-    const expectedSecret = process.env.CRON_SECRET;
-
-    if (securityConfig.cron.requireAuth) {
-      if (!expectedSecret) {
-        console.error("[CRON] CRON_SECRET not configured");
-        return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
-      }
-
-      const providedSecret =
-        cronHeader || (authHeader?.startsWith("Bearer ") && authHeader.slice(7));
-
-      if (providedSecret !== expectedSecret) {
-        console.warn("[CRON] Unauthorized scheduled-invoices/run attempt");
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-    }
-
     const now = new Date();
     const scheduledInvoices = await prisma.invoice.findMany({
       where: {

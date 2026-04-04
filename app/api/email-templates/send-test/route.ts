@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
         year: "numeric",
       }),
       companyName: workspaceName,
-      paymentLink: "https://paperchai.com/pay/test",
+      paymentLink: `${process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/pay/test-invoice`,
     };
 
     // Replace variables in subject and body

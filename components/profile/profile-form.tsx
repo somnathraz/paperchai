@@ -1,10 +1,21 @@
 "use client";
 
 import { ReactNode, useMemo, useState, useTransition, useEffect } from "react";
+import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
-import { User, Briefcase, Mail, Clock3, Globe, MessageCircle, RotateCcw, CheckCircle2, XCircle } from "lucide-react";
+import {
+  User,
+  Briefcase,
+  Mail,
+  Clock3,
+  Globe,
+  MessageCircle,
+  RotateCcw,
+  CheckCircle2,
+  XCircle,
+} from "lucide-react";
 
 type ProfileFormProps = {
   initialData: {
@@ -50,9 +61,8 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
     // Get first letter of first word
     const first = words[0][0]?.toUpperCase() || "";
     // Get first letter of second word if available, otherwise use second letter of first word
-    const second = words.length > 1
-      ? words[1][0]?.toUpperCase() || ""
-      : words[0][1]?.toUpperCase() || "";
+    const second =
+      words.length > 1 ? words[1][0]?.toUpperCase() || "" : words[0][1]?.toUpperCase() || "";
 
     return (first + second).slice(0, 2) || "PC";
   };
@@ -97,7 +107,8 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
 
   const hasChanges = useMemo(() => {
     const formChanged = JSON.stringify(form) !== JSON.stringify(initialFormData);
-    const avatarChanged = avatarFile !== null || (avatarPreview && avatarPreview !== initialData.name);
+    const avatarChanged =
+      avatarFile !== null || (avatarPreview && avatarPreview !== initialData.name);
     return formChanged || avatarChanged;
   }, [form, initialFormData, avatarFile, avatarPreview, initialData.name]);
 
@@ -175,18 +186,30 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
         <header className="space-y-1">
           <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Identity</p>
           <h3 className="text-base sm:text-lg font-semibold text-foreground">Personal info</h3>
-          <p className="text-xs sm:text-sm text-muted-foreground">Clients see this on reminders, invoices, and agreements.</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            Clients see this on reminders, invoices, and agreements.
+          </p>
         </header>
 
         {/* Avatar */}
         <div className="rounded-xl border border-border/60 bg-white/80 p-3 sm:p-4">
-          <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground mb-3">Avatar</p>
+          <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground mb-3">
+            Avatar
+          </p>
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
             <div className="flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 via-primary/60 to-emerald-400/60 text-lg sm:text-xl font-semibold text-white shadow-inner shadow-primary/30 shrink-0">
               {avatarPreview ? (
-                <Image src={avatarPreview} alt="Avatar preview" width={128} height={128} className="h-full w-full rounded-full object-cover" />
+                <Image
+                  src={avatarPreview}
+                  alt="Avatar preview"
+                  width={128}
+                  height={128}
+                  className="h-full w-full rounded-full object-cover"
+                />
               ) : (
-                <div className="flex h-full w-full items-center justify-center rounded-full bg-muted text-2xl font-semibold text-muted-foreground">{getWorkspaceInitials(workspaceName)}</div>
+                <div className="flex h-full w-full items-center justify-center rounded-full bg-muted text-2xl font-semibold text-muted-foreground">
+                  {getWorkspaceInitials(workspaceName)}
+                </div>
               )}
             </div>
             <div className="space-y-2 text-xs sm:text-sm text-muted-foreground">
@@ -201,7 +224,7 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
                       const file = e.target.files?.[0];
                       if (file) {
                         if (file.size > 2 * 1024 * 1024) {
-                          alert("File size must be less than 2MB");
+                          toast.error("File size must be less than 2MB");
                           return;
                         }
                         const url = URL.createObjectURL(file);
@@ -221,7 +244,9 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
                   </button>
                 )}
               </div>
-              <p className="text-[10px] sm:text-xs text-muted-foreground">PNG, JPG, or WebP · Min 240px · 2MB max.</p>
+              <p className="text-[10px] sm:text-xs text-muted-foreground">
+                PNG, JPG, or WebP · Min 240px · 2MB max.
+              </p>
             </div>
           </div>
         </div>
@@ -253,9 +278,15 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
       {/* Preferences Section */}
       <section className="space-y-4 rounded-xl border border-white/20 bg-white/70 p-4 sm:p-6 shadow-sm">
         <header className="space-y-1">
-          <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Preferences</p>
-          <h3 className="text-base sm:text-lg font-semibold text-foreground">Reminders & currency</h3>
-          <p className="text-xs sm:text-sm text-muted-foreground">These choices define tone, currency, and timezone everywhere.</p>
+          <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+            Preferences
+          </p>
+          <h3 className="text-base sm:text-lg font-semibold text-foreground">
+            Reminders & currency
+          </h3>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            These choices define tone, currency, and timezone everywhere.
+          </p>
         </header>
         <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           <SelectField
@@ -278,7 +309,11 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
                 <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />
                 Reminder tone
               </span>
-              <button type="button" onClick={resetTone} className="text-[10px] sm:text-xs text-primary hover:underline">
+              <button
+                type="button"
+                onClick={resetTone}
+                className="text-[10px] sm:text-xs text-primary hover:underline"
+              >
                 <RotateCcw className="mr-1 inline h-2.5 w-2.5" />
                 Reset
               </button>
@@ -303,17 +338,26 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
         <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Preview</p>
         <div className="space-y-3 text-xs sm:text-sm text-muted-foreground">
           <p>
-            <span className="font-semibold text-foreground">{form.name || "Your name"}</span> • {form.role || "Role"}
+            <span className="font-semibold text-foreground">{form.name || "Your name"}</span> •{" "}
+            {form.role || "Role"}
           </p>
           <div className="flex flex-wrap gap-1.5 sm:gap-2 text-[10px] sm:text-xs">
-            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">Tone · {form.reminderTone}</span>
-            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">Currency · {form.currency}</span>
-            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">Timezone · {form.timezone}</span>
+            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">
+              Tone · {form.reminderTone}
+            </span>
+            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">
+              Currency · {form.currency}
+            </span>
+            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">
+              Timezone · {form.timezone}
+            </span>
           </div>
           <div className="rounded-xl border border-white/30 bg-gradient-to-br from-primary/5 via-white to-emerald-50 px-3 py-2.5 sm:px-4 sm:py-3 text-xs sm:text-sm text-foreground shadow-inner">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">WhatsApp</p>
-            &quot;Hey Ankit — hope you&apos;re doing well! Dropping a {form.reminderTone.toLowerCase()} reminder for invoice #108
-            ({form.currency}).&quot;
+            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">
+              WhatsApp
+            </p>
+            &quot;Hey Ankit — hope you&apos;re doing well! Dropping a{" "}
+            {form.reminderTone.toLowerCase()} reminder for invoice #108 ({form.currency}).&quot;
           </div>
         </div>
       </section>

@@ -37,8 +37,19 @@ function getClientIp(request: NextRequest): string {
 /**
  * IP-based rate limiting (prevents DDoS)
  * Limit: 100 requests per minute per IP
+ *
+ * NOTE: This is an in-memory implementation suitable for single-instance
+ * deployments. For multi-instance or serverless at scale, replace the
+ * ipStore/accountStore Maps with Redis (e.g. Upstash).
  */
 export function checkIpRateLimit(request: NextRequest): RateLimitResult {
+  // Evict expired entries on each check to avoid unbounded memory growth
+  // in serverless environments where setInterval may not fire reliably.
+  const nowForCleanup = Date.now();
+  ipStore.forEach((usage, key) => {
+    if (nowForCleanup > usage.resetAt) ipStore.delete(key);
+  });
+
   const ip = getClientIp(request);
   const now = Date.now();
 
@@ -158,5 +169,8 @@ export function cleanupRateLimitStore() {
   });
 }
 
-// Cleanup every 5 minutes
-setInterval(cleanupRateLimitStore, 5 * 60 * 1000);
+// Best-effort cleanup in long-running Node.js environments (not relied on in serverless).
+// Each checkIpRateLimit() call also evicts expired entries inline.
+if (typeof setInterval !== "undefined") {
+  setInterval(cleanupRateLimitStore, 5 * 60 * 1000);
+}

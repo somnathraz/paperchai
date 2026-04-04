@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateToken, hashToken } from "@/lib/auth-tokens";
+import { checkIpRateLimit } from "@/lib/rate-limiter";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 import { logAuditEvent, getClientInfo } from "@/lib/security/audit-log";
 import { passwordResetRequestSchema } from "@/lib/api-schemas";
@@ -13,6 +14,11 @@ import { checkPersistentAuthRateLimit } from "@/lib/security/persistent-auth-thr
 import { z } from "zod";
 
 export async function POST(req: NextRequest) {
+  const rl = checkIpRateLimit(req);
+  if (!rl.allowed) {
+    return NextResponse.json({ error: rl.error }, { status: 429 });
+  }
+
   const clientInfo = getClientInfo(req);
 
   try {

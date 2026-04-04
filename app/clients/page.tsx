@@ -19,10 +19,7 @@ export default async function ClientsPage() {
 
   return (
     <DashboardLayout userName={session.user.name} userEmail={session.user.email}>
-      <ClientListWidget
-        userName={session.user.name}
-        userEmail={session.user.email}
-      />
+      <ClientListWidget userName={session.user.name} userEmail={session.user.email} />
     </DashboardLayout>
   );
 }

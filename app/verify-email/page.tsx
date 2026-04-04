@@ -55,8 +55,8 @@ function VerifyEmailContent() {
           setMessage(data.error || "Could not verify email.");
         } else {
           setStatus("success");
-          setMessage("Email verified. You can now sign in.");
-          setTimeout(() => router.push("/login"), 1200);
+          setMessage("Email verified. Setting up your workspace…");
+          setTimeout(() => router.push("/login?callbackUrl=/onboarding"), 1200);
         }
       } catch (error) {
         setStatus("error");
@@ -115,7 +115,10 @@ function VerifyEmailContent() {
             >
               Go to login
             </PrimaryButton>
-            <Link href="/forgot-password" className="text-sm font-semibold text-primary hover:underline">
+            <Link
+              href="/forgot-password"
+              className="text-sm font-semibold text-primary hover:underline"
+            >
               Forgot password? Request a reset
             </Link>
           </div>
@@ -127,11 +130,13 @@ function VerifyEmailContent() {
 
 export default function VerifyEmailPage() {
   return (
-    <Suspense fallback={
-      <div className="flex h-screen w-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="flex h-screen w-full items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      }
+    >
       <VerifyEmailContent />
     </Suspense>
   );

@@ -3,8 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { replaceTemplateVariables, TemplateVars } from "@/lib/reminders";
 import { getThemeHtml } from "@/lib/email-themes"; // Reusing existing theme generator if possible or just raw body
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { logCronEvent } from "@/lib/security/audit-log";
-import { securityConfig } from "@/lib/security/security.config";
 import { buildAppUrl } from "@/lib/app-url";
 
 const STEP_RETRY_DELAY_MINUTES = 20;
@@ -40,27 +40,10 @@ async function updateReminderWorkerMeta(
 
 // POST /api/internal/reminders/run
 export async function POST(req: NextRequest) {
+  const authError = verifyCronSecret(req);
+  if (authError) return authError;
+
   try {
-    // Auth check: Require CRON_SECRET for production security
-    const authHeader = req.headers.get("authorization");
-    const cronHeader = req.headers.get(securityConfig.cron.secretHeader);
-    const expectedSecret = process.env.CRON_SECRET;
-
-    if (securityConfig.cron.requireAuth) {
-      if (!expectedSecret) {
-        console.error("[CRON] CRON_SECRET not configured");
-        return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
-      }
-
-      const providedSecret =
-        cronHeader || (authHeader?.startsWith("Bearer ") && authHeader.slice(7));
-
-      if (providedSecret !== expectedSecret) {
-        console.warn("[CRON] Unauthorized reminders/run attempt");
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-    }
-
     const now = new Date();
 
     // Find pending steps that are due

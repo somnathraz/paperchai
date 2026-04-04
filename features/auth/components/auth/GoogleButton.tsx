@@ -14,7 +14,9 @@ export function GoogleButton({ label, onClick, disabled }: GoogleButtonProps) {
       onClick={onClick}
       disabled={disabled}
     >
-      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black text-white text-xs font-bold">G</span>
+      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black text-white text-xs font-bold">
+        G
+      </span>
       {label}
     </button>
   );

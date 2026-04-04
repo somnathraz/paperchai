@@ -1,4 +1,3 @@
-
 import { useEffect } from "react";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import {
@@ -8,7 +7,7 @@ import {
   updateProject,
   createMilestone,
   updateMilestone,
-  clearSelectedProject
+  clearSelectedProject,
 } from "../store/projectsSlice";
 import { CreateProjectPayload, UpdateProjectPayload } from "@/lib/api/services";
 
@@ -33,7 +32,8 @@ export const useProjects = () => {
     fetchProjects: () => dispatch(fetchProjects()),
     fetchProject: (id: string) => dispatch(fetchProjectById(id)),
     createProject: (payload: CreateProjectPayload) => dispatch(createProject(payload)),
-    updateProject: (id: string, data: UpdateProjectPayload) => dispatch(updateProject({ id, data })),
+    updateProject: (id: string, data: UpdateProjectPayload) =>
+      dispatch(updateProject({ id, data })),
 
     // Milestone Actions
     addMilestone: (projectId: string, data: any) => dispatch(createMilestone({ projectId, data })),

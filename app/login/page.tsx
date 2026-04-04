@@ -182,7 +182,7 @@ export default function LoginPage() {
             </div>
           )}
           <p className="pt-2 text-center text-[11px] text-muted-foreground">
-            ✨ 98% users logged in last week • 1,200+ active workspaces
+            No credit card required &mdash; free during beta
           </p>
           <p className="text-center text-[11px] text-muted-foreground">
             By continuing, you agree to our{" "}

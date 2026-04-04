@@ -80,6 +80,14 @@ export const TIER_LIMITS = {
 export type UserTier = PlanCode;
 
 // Deprecated compatibility helper. Route truth must come from workspace entitlement snapshots.
-export function getUserTier(): UserTier {
+// OWNER_EMAILS env var: comma-separated list of emails that bypass plan limits.
+export function getUserTier(userId?: string, email?: string): UserTier {
+  const ownerEmails = (process.env.OWNER_EMAILS || "")
+    .split(",")
+    .map((e) => e.trim())
+    .filter(Boolean);
+  if (email && ownerEmails.includes(email)) {
+    return "PREMIER";
+  }
   return "FREE";
 }

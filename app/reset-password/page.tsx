@@ -40,7 +40,10 @@ function ResetPasswordContent() {
 
   // Memoized validations
   const passwordValidation = useMemo(() => validatePassword(password), [password]);
-  const passwordMatchValidation = useMemo(() => validatePasswordMatch(password, confirm), [password, confirm]);
+  const passwordMatchValidation = useMemo(
+    () => validatePasswordMatch(password, confirm),
+    [password, confirm]
+  );
   const canSubmit = useMemo(
     () => token && passwordValidation.valid && passwordMatchValidation.valid,
     [token, passwordValidation, passwordMatchValidation]
@@ -75,7 +78,16 @@ function ResetPasswordContent() {
         setTimeout(() => router.push("/login"), 1200);
       }
     },
-    [token, password, passwordValidation, passwordMatchValidation, resetPassword, clearError, clearStatus, router]
+    [
+      token,
+      password,
+      passwordValidation,
+      passwordMatchValidation,
+      resetPassword,
+      clearError,
+      clearStatus,
+      router,
+    ]
   );
 
   const displayError = localError || error;
@@ -120,7 +132,11 @@ function ResetPasswordContent() {
             </div>
           )}
 
-          <PrimaryButton type="submit" icon={<ShieldCheck className="h-4 w-4" />} disabled={isLoading || !canSubmit}>
+          <PrimaryButton
+            type="submit"
+            icon={<ShieldCheck className="h-4 w-4" />}
+            disabled={isLoading || !canSubmit}
+          >
             {isLoading ? "Updating..." : "Update password"}
           </PrimaryButton>
         </form>
@@ -138,11 +154,13 @@ function ResetPasswordContent() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={
-      <div className="flex h-screen w-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="flex h-screen w-full items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      }
+    >
       <ResetPasswordContent />
     </Suspense>
   );

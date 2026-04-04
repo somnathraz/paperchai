@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { sendInvoiceEmail } from "@/lib/invoices/send-invoice";
+import { checkIpRateLimit } from "@/lib/rate-limiter";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 import { prisma } from "@/lib/prisma";
 import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
@@ -34,6 +35,11 @@ const sendInvoiceSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const rl = checkIpRateLimit(req);
+  if (!rl.allowed) {
+    return NextResponse.json({ error: rl.error }, { status: 429 });
+  }
+
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

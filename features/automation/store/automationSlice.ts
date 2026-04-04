@@ -1,10 +1,13 @@
-
 /**
  * Automation Slice
  */
 
 import { createSlice, createAsyncThunk, PayloadAction } from "@reduxjs/toolkit";
-import { automationService, AutomationStats, IntegrationStatus } from "@/lib/api/services/automation.service";
+import {
+  automationService,
+  AutomationStats,
+  IntegrationStatus,
+} from "@/lib/api/services/automation.service";
 
 export interface AutomationState {
   stats: AutomationStats | null;
@@ -29,7 +32,7 @@ export const fetchAutomationData = createAsyncThunk(
     try {
       const [automationsRes, statusRes] = await Promise.all([
         automationService.getAutomations(),
-        automationService.getIntegrationStatus()
+        automationService.getIntegrationStatus(),
       ]);
 
       if (!automationsRes.data || !statusRes.data) {
@@ -41,7 +44,7 @@ export const fetchAutomationData = createAsyncThunk(
       return {
         stats: automationsRes.data.success ? automationsRes.data.automations : null,
         integrationStatus: statusRes.data,
-        error
+        error,
       };
     } catch (error: any) {
       return rejectWithValue(error.message || "Failed to fetch automation data");
@@ -78,7 +81,7 @@ const automationSlice = createSlice({
         state.isLoading = false;
         state.error = action.payload as string;
       });
-  }
+  },
 });
 
 export const { setActiveTab, clearError } = automationSlice.actions;

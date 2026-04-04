@@ -49,6 +49,9 @@ client_secret_*.json
 *.swo
 *~
 
+# Worktree-local lint-staged config (created temporarily for commits in git worktrees)
+.lintstagedrc.json
+
 # IDE files
 .vscode/
 .idea/

@@ -38,11 +38,13 @@ paperchai handles the boring parts of invoicing: auto-reminders, AI-generated in
 | Validation   | Zod                                     |
 
 ---
+
 [🔴 Live Demo](https://paperchai.com) | [📄 View Portfolio](https://www.somanathkhadanga.com/)
 
 ![Project Demo Gif](./public/demo.gif)
 
 ### 1. Install dependencies
+
 ## 🧐 The Problem
 
 Existing freelance invoicing tools are bloated. They are built for accountants, requiring complex setups for inventory and taxes that freelance developers don't need. Sending a simple invoice took 15 clicks, and chasing payments was socially awkward.
@@ -168,6 +170,7 @@ Pull requests are welcome. For major changes, open an issue first.
 ## License
 
 MIT
+
 ## 💡 The Solution
 
 PaperChai is an "Anti-Accounting" tool designed for speed. It focuses purely on cash flow: generating an invoice from a Notion doc in seconds and using AI to handle payment follow-ups without the awkwardness.

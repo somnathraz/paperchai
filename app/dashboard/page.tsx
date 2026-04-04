@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { DashboardLayout } from "@/components/dashboard/layout-shell";
@@ -26,6 +27,19 @@ import { CelebrationView } from "@/features/dashboard/components/stages/Celebrat
 import { InsightsView } from "@/features/dashboard/components/stages/InsightsView";
 import { OverviewV2Section } from "@/features/dashboard/components/OverviewV2Section";
 import { ReceivablesSection } from "@/features/dashboard/components/ReceivablesSection";
+
+function TabSkeleton() {
+  return (
+    <div className="space-y-6 animate-pulse">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-28 rounded-2xl bg-muted/60" />
+        ))}
+      </div>
+      <div className="h-64 rounded-2xl bg-muted/60" />
+    </div>
+  );
+}
 
 type Props = {
   searchParams: Promise<{ tab?: string }>;
@@ -81,36 +95,40 @@ export default async function DashboardPage({ searchParams }: Props) {
         {/* Tab Navigation */}
         <DashboardTabNav activeTab={activeTab} />
 
-        {/* Tab Content - Server Components */}
+        {/* Tab Content - Server Components wrapped in Suspense */}
         <div className="min-h-[500px] px-4 sm:px-0">
           {activeTab === "overview" && (
-            <div className="space-y-6">
-              <OverviewV2Section />
+            <Suspense fallback={<TabSkeleton />}>
+              <div className="space-y-6">
+                <OverviewV2Section />
 
-              {/* STRICT STATE MACHINE RENDERING */}
-              {dashboardState.stage === "NO_INVOICE_YET" && <SetupView />}
-              {dashboardState.stage === "INVOICE_CREATED_BUT_NOT_SENT" && (
-                <DraftView state={dashboardState} />
-              )}
-              {dashboardState.stage === "SENT_WAITING_FOR_PAYMENT" && (
-                <WaitingView state={dashboardState} />
-              )}
-              {dashboardState.stage === "OVERDUE_EXISTS" && (
-                <ActionView state={dashboardState} userId={userId} />
-              )}
-              {dashboardState.stage === "FIRST_PAYMENT_RECEIVED" && (
-                <CelebrationView state={dashboardState} />
-              )}
-              {dashboardState.stage === "MATURE_USER" && <InsightsView />}
-            </div>
+                {/* STRICT STATE MACHINE RENDERING */}
+                {dashboardState.stage === "NO_INVOICE_YET" && <SetupView />}
+                {dashboardState.stage === "INVOICE_CREATED_BUT_NOT_SENT" && (
+                  <DraftView state={dashboardState} />
+                )}
+                {dashboardState.stage === "SENT_WAITING_FOR_PAYMENT" && (
+                  <WaitingView state={dashboardState} />
+                )}
+                {dashboardState.stage === "OVERDUE_EXISTS" && (
+                  <ActionView state={dashboardState} userId={userId} />
+                )}
+                {dashboardState.stage === "FIRST_PAYMENT_RECEIVED" && (
+                  <CelebrationView state={dashboardState} />
+                )}
+                {dashboardState.stage === "MATURE_USER" && <InsightsView />}
+              </div>
+            </Suspense>
           )}
 
           {activeTab === "automation" && (
-            <div className="space-y-6">
-              <AutomationLifecycle />
-              <RecurringPlansSection compact />
-              <RemindersTimeline />
-            </div>
+            <Suspense fallback={<TabSkeleton />}>
+              <div className="space-y-6">
+                <AutomationLifecycle />
+                <RecurringPlansSection compact />
+                <RemindersTimeline />
+              </div>
+            </Suspense>
           )}
 
           {activeTab === "receivables" && (
@@ -120,28 +138,34 @@ export default async function DashboardPage({ searchParams }: Props) {
           )}
 
           {activeTab === "invoices" && (
-            <div className="space-y-6">
-              <InvoiceTableWidget />
-              <ReliabilityTable />
-            </div>
+            <Suspense fallback={<TabSkeleton />}>
+              <div className="space-y-6">
+                <InvoiceTableWidget />
+                <ReliabilityTable />
+              </div>
+            </Suspense>
           )}
 
           {activeTab === "clients" && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <ReliabilityRadar />
-                <ClientHealth />
+            <Suspense fallback={<TabSkeleton />}>
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  <ReliabilityRadar />
+                  <ClientHealth />
+                </div>
               </div>
-            </div>
+            </Suspense>
           )}
 
           {activeTab === "activity" && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <ActivityWidget />
-                <Insights />
+            <Suspense fallback={<TabSkeleton />}>
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  <ActivityWidget />
+                  <Insights />
+                </div>
               </div>
-            </div>
+            </Suspense>
           )}
         </div>
       </div>

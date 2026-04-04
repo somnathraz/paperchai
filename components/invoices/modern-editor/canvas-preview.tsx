@@ -94,31 +94,36 @@ export const CanvasPreview = memo(function CanvasPreview({
     const defaultRate = taxSettings.defaultRate || 0;
     const isInclusive = taxSettings.inclusive;
 
-    // Calculate subtotal and tax
-    let subtotal = 0;
-    let tax = 0;
+    // Use integer paise arithmetic to avoid float accumulation errors (0.1 + 0.2 !== 0.3)
+    const SCALE = 100;
+    let subtotalPaise = 0;
+    let taxPaise = 0;
 
     formState.items.forEach((item) => {
-      const lineTotal = (item.quantity || 0) * (item.unitPrice || 0);
+      const linePaise = Math.round((item.quantity || 0) * (item.unitPrice || 0) * SCALE);
       const itemTaxRate = item.taxRate ?? defaultRate;
 
       if (isInclusive && itemTaxRate > 0) {
-        // Price includes tax - extract tax from price
-        const basePrice = lineTotal / (1 + itemTaxRate / 100);
-        subtotal += basePrice;
-        tax += lineTotal - basePrice;
+        const basePaise = Math.round((linePaise * SCALE) / (SCALE + itemTaxRate));
+        subtotalPaise += basePaise;
+        taxPaise += linePaise - basePaise;
       } else {
-        // Price excludes tax - add tax to price
-        subtotal += lineTotal;
-        tax += (lineTotal * itemTaxRate) / 100;
+        subtotalPaise += linePaise;
+        taxPaise += Math.round((linePaise * itemTaxRate) / 100);
       }
     });
+
+    const subtotal = subtotalPaise / SCALE;
+    const tax = taxPaise / SCALE;
 
     const discountTotal =
       formState.adjustments
         ?.filter((a) => a.type === "discount")
         .reduce((sum, adj) => {
-          const base = adj.mode === "percent" ? (adj.value / 100) * subtotal : adj.value;
+          const base =
+            adj.mode === "percent"
+              ? Math.round((adj.value / 100) * subtotalPaise) / SCALE
+              : adj.value;
           return sum + base;
         }, 0) || 0;
 
@@ -126,16 +131,30 @@ export const CanvasPreview = memo(function CanvasPreview({
       formState.adjustments
         ?.filter((a) => a.type === "fee")
         .reduce((sum, adj) => {
-          const base = adj.mode === "percent" ? (adj.value / 100) * subtotal : adj.value;
+          const base =
+            adj.mode === "percent"
+              ? Math.round((adj.value / 100) * subtotalPaise) / SCALE
+              : adj.value;
           return sum + base;
         }, 0) || 0;
 
-    const total = isInclusive
-      ? subtotal + tax - discountTotal + feeTotal // For inclusive, subtotal already excludes tax
-      : subtotal + tax - discountTotal + feeTotal;
+    const total = subtotal + tax - discountTotal + feeTotal;
 
     return { subtotal, tax, discountTotal, feeTotal, total };
   }, [formState.items, formState.adjustments, formState.taxSettings]);
+
+  const currency = formState.currency || "INR";
+  const fmtCurrency = (amount: number) => {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    } catch {
+      return `${currency} ${amount.toLocaleString()}`;
+    }
+  };
 
   const mockData = {
     businessName: formState.businessName || "Your Business",
@@ -168,11 +187,11 @@ export const CanvasPreview = memo(function CanvasPreview({
     taxLabel: formState.taxLabel || "Tax",
     extraSummaryLabel: formState.extraSummaryLabel,
     extraSummaryValue: formState.extraSummaryValue,
-    total: `₹${totals.total.toLocaleString()}`,
-    subtotal: `₹${totals.subtotal.toLocaleString()}`,
-    tax: `₹${totals.tax.toLocaleString()}`,
-    discount: totals.discountTotal ? `₹${totals.discountTotal.toLocaleString()}` : undefined,
-    fee: totals.feeTotal ? `₹${totals.feeTotal.toLocaleString()}` : undefined,
+    total: fmtCurrency(totals.total),
+    subtotal: fmtCurrency(totals.subtotal),
+    tax: fmtCurrency(totals.tax),
+    discount: totals.discountTotal ? fmtCurrency(totals.discountTotal) : undefined,
+    fee: totals.feeTotal ? fmtCurrency(totals.feeTotal) : undefined,
     notes: formState.notes,
     paymentTerms: formState.terms,
     paymentMethod: formState.paymentMethod,
@@ -189,7 +208,7 @@ export const CanvasPreview = memo(function CanvasPreview({
       unit: item.unit || "nos",
       rate: item.unitPrice || 0,
       hsnCode: item.hsnCode,
-      amount: `₹${((item.quantity || 0) * (item.unitPrice || 0)).toLocaleString()}`,
+      amount: fmtCurrency((item.quantity || 0) * (item.unitPrice || 0)),
     })),
   };
 

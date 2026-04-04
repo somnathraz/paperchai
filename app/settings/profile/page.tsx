@@ -44,7 +44,7 @@ export default async function ProfileSettingsPage() {
     <SettingsLayout
       current="/settings/profile"
       title="Profile settings"
-      description="Update yor profile settings."
+      description="Update your profile settings."
     >
       <ProfileForm
         initialData={{

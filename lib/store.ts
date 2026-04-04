@@ -10,19 +10,19 @@ import reminderReducer from "@/features/reminders/store/reminderSlice";
 import automationReducer from "@/features/automation/store/automationSlice";
 
 export const makeStore = () => {
-    return configureStore({
-        reducer: {
-            ui: uiReducer,
-            editor: editorReducer,
-            auth: authReducer,
-            dashboard: dashboardReducer,
-            invoices: invoiceReducer,
-            clients: clientsReducer,
-            projects: projectsReducer,
-            reminders: reminderReducer,
-            automation: automationReducer,
-        },
-    });
+  return configureStore({
+    reducer: {
+      ui: uiReducer,
+      editor: editorReducer,
+      auth: authReducer,
+      dashboard: dashboardReducer,
+      invoices: invoiceReducer,
+      clients: clientsReducer,
+      projects: projectsReducer,
+      reminders: reminderReducer,
+      automation: automationReducer,
+    },
+  });
 };
 
 // Infer the type of makeStore

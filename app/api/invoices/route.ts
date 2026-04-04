@@ -70,12 +70,8 @@ export async function POST(req: Request) {
     notes,
     terms,
     reminderTone,
-    items = [],
+    items,
   } = body;
-
-  if (!clientId || !number) {
-    return NextResponse.json({ error: "Client and invoice number are required" }, { status: 400 });
-  }
 
   const issueDateObj = issueDate ? new Date(issueDate) : undefined;
   const dueDateObj = dueDate ? new Date(dueDate) : undefined;
@@ -153,7 +149,7 @@ export async function POST(req: Request) {
         subtotal: 0,
         total: 0,
         items: {
-          create: items.map((item: any) => ({
+          create: (items || []).map((item: any) => ({
             title: item.title,
             description: item.description,
             quantity: item.quantity ?? 1,

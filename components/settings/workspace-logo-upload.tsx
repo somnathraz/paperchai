@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useState, useRef } from "react";
+import { toast } from "sonner";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Upload, X, Image as ImageIcon } from "lucide-react";
@@ -28,13 +29,13 @@ export function WorkspaceLogoUpload({ value, onChange, className }: WorkspaceLog
   const handleFile = (file: File) => {
     // Check file type
     if (!file.type.match(/^image\/(jpeg|png|gif|webp)$/)) {
-      alert("Please upload an image file (JPEG, PNG, GIF, WEBP)");
+      toast.error("Please upload an image file (JPEG, PNG, GIF, WEBP)");
       return;
     }
 
     // Check file size (max 2MB)
     if (file.size > 2 * 1024 * 1024) {
-      alert("Image size must be less than 2MB");
+      toast.error("Image size must be less than 2MB");
       return;
     }
 
@@ -85,7 +86,13 @@ export function WorkspaceLogoUpload({ value, onChange, className }: WorkspaceLog
         <div className="shrink-0">
           {preview ? (
             <div className="relative group">
-              <Image src={preview} alt="Workspace logo" width={80} height={80} className="h-20 w-20 rounded-lg object-cover" />
+              <Image
+                src={preview}
+                alt="Workspace logo"
+                width={80}
+                height={80}
+                className="h-20 w-20 rounded-lg object-cover"
+              />
               <button
                 type="button"
                 onClick={(e) => {
@@ -107,7 +114,9 @@ export function WorkspaceLogoUpload({ value, onChange, className }: WorkspaceLog
         <div
           className={cn(
             "flex-1 rounded-lg border-2 border-dashed p-6 transition-colors cursor-pointer",
-            isDragging ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50"
+            isDragging
+              ? "border-primary bg-primary/5"
+              : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50"
           )}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -116,12 +125,8 @@ export function WorkspaceLogoUpload({ value, onChange, className }: WorkspaceLog
         >
           <div className="flex flex-col items-center justify-center gap-1 text-center">
             <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-            <p className="text-sm font-medium text-foreground">
-              Click to upload or drag and drop
-            </p>
-            <p className="text-xs text-muted-foreground">
-              SVG, PNG, JPG or GIF (max. 2MB)
-            </p>
+            <p className="text-sm font-medium text-foreground">Click to upload or drag and drop</p>
+            <p className="text-xs text-muted-foreground">SVG, PNG, JPG or GIF (max. 2MB)</p>
           </div>
           <input
             ref={fileInputRef}
@@ -132,7 +137,9 @@ export function WorkspaceLogoUpload({ value, onChange, className }: WorkspaceLog
           />
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">Appears on invoices, reminders, and month-end recaps.</p>
+      <p className="text-xs text-muted-foreground">
+        Appears on invoices, reminders, and month-end recaps.
+      </p>
     </div>
   );
 }

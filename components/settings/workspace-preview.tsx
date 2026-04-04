@@ -52,4 +52,3 @@ export function WorkspacePreview({ name, logo, address, taxId }: WorkspacePrevie
     </div>
   );
 }
-

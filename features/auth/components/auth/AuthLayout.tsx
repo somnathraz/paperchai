@@ -33,7 +33,10 @@ export function AuthLayout({ badgeText, title, subtitle, quickFacts, children }:
 
       <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-6 py-24 sm:px-10 lg:flex-row lg:items-center lg:justify-between lg:py-24">
         <div className="max-w-xl space-y-6 self-center">
-          <Link href="/" className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary/70 hover:text-primary hover:underline">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary/70 hover:text-primary hover:underline"
+          >
             <ArrowLeft className="h-3.5 w-3.5" />
             Back to home
           </Link>

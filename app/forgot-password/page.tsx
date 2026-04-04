@@ -74,7 +74,11 @@ export default function ForgotPasswordPage() {
             </div>
           )}
 
-          <PrimaryButton type="submit" icon={<RefreshCw className="h-4 w-4" />} disabled={isLoading || !canSubmit}>
+          <PrimaryButton
+            type="submit"
+            icon={<RefreshCw className="h-4 w-4" />}
+            disabled={isLoading || !canSubmit}
+          >
             {isLoading ? "Sending..." : "Send reset link"}
           </PrimaryButton>
         </form>
