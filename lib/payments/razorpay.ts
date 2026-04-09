@@ -18,6 +18,8 @@ type RazorpayPaymentLinkPayload = {
   notes?: Record<string, string>;
   accept_partial?: boolean;
   first_min_partial_amount?: number;
+  callback_url?: string;
+  callback_method?: "get";
 };
 
 type RazorpayPaymentLinkResponse = {

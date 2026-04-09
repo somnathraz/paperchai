@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { createRazorpayPaymentLink, getRazorpayPublicConfig } from "@/lib/payments/razorpay";
+import { buildAppUrl } from "@/lib/app-url";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -99,6 +100,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       invoiceNumber: invoice.number,
     },
     accept_partial: Boolean(invoice.allowPartialPayments),
+    callback_url: buildAppUrl(`/pay/${invoice.id}?payment=success`),
+    callback_method: "get",
   });
 
   const updatedInvoice = await prisma.invoice.update({

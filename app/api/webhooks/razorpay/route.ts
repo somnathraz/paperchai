@@ -9,6 +9,7 @@ import {
   recordPaymentEvent,
 } from "@/lib/payments/provider-events";
 import { recordInvoicePayment } from "@/lib/invoices/record-payment";
+import { sendPaymentReceivedEmail } from "@/lib/billing/emails";
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
@@ -131,10 +132,23 @@ export async function POST(req: NextRequest) {
     where: { id: invoiceId, workspaceId },
     select: {
       id: true,
+      number: true,
+      currency: true,
       amountPaid: true,
       sendMeta: true,
       paymentReference: true,
       paymentLinkUrl: true,
+      client: { select: { name: true } },
+      workspace: {
+        select: {
+          name: true,
+          members: {
+            where: { role: "OWNER", removedAt: null },
+            take: 1,
+            select: { user: { select: { email: true, name: true } } },
+          },
+        },
+      },
     },
   });
 
@@ -275,6 +289,24 @@ export async function POST(req: NextRequest) {
         externalRefundId: refundId,
       }
     );
+    // Send payment received email to workspace owner (fire-and-forget)
+    if (!result.duplicate) {
+      const owner = invoice.workspace?.members?.[0]?.user;
+      if (owner?.email) {
+        sendPaymentReceivedEmail({
+          ownerEmail: owner.email,
+          ownerName: owner.name || owner.email.split("@")[0],
+          workspaceName: invoice.workspace?.name || "Your workspace",
+          invoiceNumber: invoice.number,
+          invoiceId: invoiceId,
+          clientName: invoice.client?.name || "Client",
+          amount: paymentAmountMajor,
+          currency: invoice.currency || "INR",
+          fullyPaid: result.fullyPaid,
+        }).catch((err) => console.error("[Razorpay webhook] Failed to send payment email:", err));
+      }
+    }
+
     await recordPaymentEvent({
       provider: "razorpay",
       eventType: event,
