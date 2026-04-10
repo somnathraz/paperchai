@@ -55,6 +55,8 @@ export function useRazorpaySubscriptionCheckout() {
       return;
     }
 
+    // Subscriptions Standard Checkout: `subscription_id` must be sub_… from Razorpay
+    // (created via POST /v1/subscriptions with plan_id plan_…). Never pass plan_… here.
     const rzp = new (window as any).Razorpay({
       key: opts.keyId,
       subscription_id: opts.subscriptionId,

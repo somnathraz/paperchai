@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { notifyBillingUpgradeSuccess } from "@/components/settings/billing-upgrade-celebration";
 import {
   BILLING_CURRENCIES,
   PLAN_DEFINITIONS,
@@ -27,6 +29,7 @@ function formatMoney(amount: number, currency: string) {
 
 type WorkspacePlanCardsProps = {
   currentPlanCode: PlanCode;
+  hasActivePaidPlan: boolean;
   canManageBilling: boolean;
   razorpayConfigured: boolean;
   platformBypass: boolean;
@@ -34,10 +37,12 @@ type WorkspacePlanCardsProps = {
 
 export function WorkspacePlanCards({
   currentPlanCode,
+  hasActivePaidPlan,
   canManageBilling,
   razorpayConfigured,
   platformBypass,
 }: WorkspacePlanCardsProps) {
+  const router = useRouter();
   const [yearly, setYearly] = useState(true);
   const [currency, setCurrency] = useState<(typeof BILLING_CURRENCIES)[number]>("INR");
   const [loadingPlan, setLoadingPlan] = useState<PlanCode | null>(null);
@@ -85,12 +90,22 @@ export function WorkspacePlanCards({
                 razorpay_signature: response.razorpay_signature,
               }),
             });
+            const activatePayload = await activateRes.json().catch(() => ({}));
             if (activateRes.ok) {
-              toast.success("Plan activated! Loading your new features\u2026");
-              setTimeout(() => window.location.reload(), 800);
+              const upgradedCode =
+                (activatePayload as { planCode?: string }).planCode || String(target);
+              notifyBillingUpgradeSuccess(upgradedCode);
+              toast.success("Plan activated! Your new features are ready.");
+              setLoadingPlan(null);
+              router.refresh();
             } else {
-              toast.success("Payment done! Your plan will activate shortly.");
-              setTimeout(() => window.location.reload(), 2000);
+              toast.success("Payment done! Your plan will activate shortly.", {
+                description:
+                  (activatePayload as { error?: string }).error ||
+                  "Refreshing to pick up the latest subscription…",
+              });
+              setLoadingPlan(null);
+              router.refresh();
             }
           },
           onFailure: () => {
@@ -207,13 +222,17 @@ export function WorkspacePlanCards({
           }
 
           const busy = loadingPlan === candidate.code;
+          const nextTier = PUBLIC_PLAN_ORDER.find((code) => isPlanUpgrade(currentPlanCode, code));
 
           return (
             <div
               key={candidate.code}
+              id={`plan-card-${candidate.code}`}
               className={cn(
-                "flex flex-col rounded-2xl border p-5",
-                isCurrent ? "border-primary bg-primary/5" : "border-white/20 bg-white/70"
+                "flex flex-col rounded-2xl border p-5 transition-shadow duration-300",
+                isCurrent
+                  ? "border-primary ring-2 ring-primary/35 shadow-lg shadow-primary/15 bg-gradient-to-b from-primary/10 via-primary/5 to-white/80"
+                  : "border-white/20 bg-white/70"
               )}
             >
               <div className="flex items-start justify-between gap-2">
@@ -245,13 +264,53 @@ export function WorkspacePlanCards({
 
               <div className="mt-5">
                 {buttonAction === "current" ? (
-                  <button
-                    type="button"
-                    disabled
-                    className="w-full rounded-full border border-primary/30 bg-primary/10 py-2.5 text-sm font-semibold text-primary"
-                  >
-                    Current plan
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full rounded-full border border-primary/40 bg-primary/15 py-2.5 text-sm font-semibold text-primary shadow-sm"
+                    >
+                      Current plan
+                    </button>
+                    {hasActivePaidPlan ? (
+                      <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+                        {nextTier ? (
+                          <button
+                            type="button"
+                            className="font-medium text-primary underline-offset-2 hover:underline"
+                            onClick={() =>
+                              document
+                                .getElementById(`plan-card-${nextTier}`)
+                                ?.scrollIntoView({ behavior: "smooth", block: "center" })
+                            }
+                          >
+                            View upgrade options
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground/90">
+                            You are on the top tier in this list.
+                          </span>
+                        )}
+                        <span className="text-muted-foreground/70"> · </span>
+                        <button
+                          type="button"
+                          className="font-medium text-primary underline-offset-2 hover:underline"
+                          onClick={() =>
+                            document
+                              .getElementById("workspace-plans")
+                              ?.scrollIntoView({ behavior: "smooth" })
+                          }
+                        >
+                          Explore all plans
+                        </button>
+                      </p>
+                    ) : !hasActivePaidPlan && currentPlanCode === "FREE" ? (
+                      <p className="text-center text-[11px] text-muted-foreground">
+                        Pick a paid tier in this list to unlock reminders, AI, and automation at
+                        scale.
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
                 {buttonAction === "upgrade" ? (
                   !canManageBilling || platformBypass ? (

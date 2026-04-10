@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+import { notifyBillingUpgradeSuccess } from "@/components/settings/billing-upgrade-celebration";
 
 export function SubscriptionSuccessBanner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [activating, setActivating] = useState(false);
   const attempted = useRef(false);
@@ -33,7 +35,6 @@ export function SubscriptionSuccessBanner() {
     window.history.replaceState({}, "", url.toString());
 
     if (paymentId && paymentLinkId && referenceId && status && signature) {
-      // Synchronous activation via callback params
       setActivating(true);
       fetch("/api/billing/subscription/activate", {
         method: "POST",
@@ -47,35 +48,47 @@ export function SubscriptionSuccessBanner() {
         }),
       })
         .then((res) => res.json().catch(() => ({})))
-        .then((data) => {
-          if (data.ok || data.alreadyActivated) {
-            toast.success("Plan upgraded! Your new features are active now.", {
-              duration: 5000,
-            });
-            setTimeout(() => window.location.reload(), 800);
-          } else {
-            // Activation failed — show toast anyway, webhook will retry
-            toast.success("Payment received! Your plan will activate shortly.", {
-              duration: 6000,
-              description: data.error || "Refresh in a few seconds to see your new plan.",
-            });
+        .then(
+          (data: {
+            ok?: boolean;
+            alreadyActivated?: boolean;
+            planCode?: string;
+            error?: string;
+          }) => {
+            if (data.ok || data.alreadyActivated) {
+              const code = data.planCode;
+              if (code && code !== "UNKNOWN") {
+                notifyBillingUpgradeSuccess(code);
+              }
+              toast.success("Plan upgraded! Your new features are active now.", {
+                duration: 5000,
+              });
+              router.refresh();
+            } else {
+              toast.success("Payment received! Your plan will activate shortly.", {
+                duration: 6000,
+                description: data.error || "Refresh in a few seconds to see your new plan.",
+              });
+              router.refresh();
+            }
           }
-        })
+        )
         .catch(() => {
           toast.success("Payment received! Your plan will activate shortly.", {
             duration: 6000,
             description: "Refresh in a few seconds if your plan hasn't updated.",
           });
+          router.refresh();
         })
         .finally(() => setActivating(false));
     } else {
-      // No Razorpay params — show generic toast (webhook-only path)
       toast.success("Payment received! Your plan is being activated.", {
         duration: 6000,
         description: "It may take a few seconds for your plan to reflect here.",
       });
+      router.refresh();
     }
-  }, [searchParams]);
+  }, [searchParams, router]);
 
   if (!activating) return null;
 

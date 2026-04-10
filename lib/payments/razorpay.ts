@@ -5,6 +5,7 @@ type RazorpayPaymentLinkPayload = {
   currency: string;
   description: string;
   reference_id: string;
+  expire_by?: number;
   customer?: {
     name?: string;
     email?: string;
@@ -236,6 +237,7 @@ export async function createRazorpayCustomer(opts: {
   return json as RazorpayCustomerResponse;
 }
 
+/** Creates a Razorpay subscription server-side. `planId` is the Razorpay plan id (plan_…). */
 export async function createRazorpaySubscription(opts: {
   planId: string;
   customerId?: string;

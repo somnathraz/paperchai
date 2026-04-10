@@ -7,6 +7,23 @@ import { canWriteWorkspace, ensureActiveWorkspace, getWorkspaceMembership } from
 import { createRazorpayPaymentLink, getRazorpayPublicConfig } from "@/lib/payments/razorpay";
 import { buildAppUrl } from "@/lib/app-url";
 
+const RAZORPAY_MIN_LINK_LIFETIME_SECONDS = 15 * 60;
+const RAZORPAY_DEFAULT_LINK_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
+
+function getInvoicePaymentLinkExpiry(dueDate?: Date | null) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const minimumValidExpiry = nowSeconds + RAZORPAY_MIN_LINK_LIFETIME_SECONDS;
+
+  if (dueDate) {
+    const dueDateSeconds = Math.floor(dueDate.getTime() / 1000);
+    if (Number.isFinite(dueDateSeconds) && dueDateSeconds >= minimumValidExpiry) {
+      return dueDateSeconds;
+    }
+  }
+
+  return nowSeconds + RAZORPAY_DEFAULT_LINK_LIFETIME_SECONDS;
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -84,6 +101,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     currency: invoice.currency || "INR",
     description: `Invoice ${invoice.number} from ${workspace.name}`,
     reference_id: referenceId,
+    expire_by: getInvoicePaymentLinkExpiry(invoice.dueDate),
     customer: {
       name: invoice.client?.name || undefined,
       email: invoice.client?.email || undefined,

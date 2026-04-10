@@ -30,6 +30,8 @@ const bodySchema = z.object({
   currency: z.enum(BILLING_CURRENCIES),
 });
 
+const RAZORPAY_SUBSCRIPTION_LINK_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -206,6 +208,7 @@ export async function POST(req: NextRequest) {
     currency: body.currency,
     description: `PaperChai ${planMeta.name} (${body.interval}ly) — ${workspace.name}`,
     reference_id: referenceId,
+    expire_by: Math.floor(Date.now() / 1000) + RAZORPAY_SUBSCRIPTION_LINK_LIFETIME_SECONDS,
     customer: {
       name: session.user.name || undefined,
       email: session.user.email || undefined,

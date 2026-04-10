@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Find checkout intent from audit log to get planCode and interval
-    const checkoutLog = await prisma.auditLog.findFirst({
+    let checkoutLog = await prisma.auditLog.findFirst({
       where: {
         workspaceId: workspace.id,
         action: "BILLING_CHECKOUT_STARTED",
@@ -140,6 +140,20 @@ export async function POST(req: NextRequest) {
       },
       orderBy: { createdAt: "desc" },
     });
+
+    if (!checkoutLog) {
+      const recent = await prisma.auditLog.findMany({
+        where: { workspaceId: workspace.id, action: "BILLING_CHECKOUT_STARTED" },
+        orderBy: { createdAt: "desc" },
+        take: 30,
+      });
+      checkoutLog =
+        recent.find(
+          (row) =>
+            (row.metadata as { razorpaySubscriptionId?: string } | null)?.razorpaySubscriptionId ===
+            subscriptionId
+        ) || null;
+    }
 
     if (!checkoutLog) {
       return NextResponse.json(

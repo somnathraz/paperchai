@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
@@ -17,6 +18,9 @@ import { BillingRefundActionsCard } from "@/components/settings/billing-refund-a
 import { getRefundProviderReadiness } from "@/lib/billing/provider-refunds";
 import { SubscriptionSuccessBanner } from "@/components/settings/subscription-success-banner";
 import { WorkspacePlanCards } from "@/components/settings/workspace-plan-cards";
+import { BillingUpgradeCelebration } from "@/components/settings/billing-upgrade-celebration";
+
+export const dynamic = "force-dynamic";
 
 function formatMoney(amount: number, currency: string) {
   return new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-US", {
@@ -26,8 +30,6 @@ function formatMoney(amount: number, currency: string) {
     maximumFractionDigits: 0,
   }).format(amount / 100);
 }
-
-const refundReadiness = getRefundProviderReadiness();
 
 export default async function BillingSettingsPage() {
   const session = await getServerSession(authOptions);
@@ -40,6 +42,7 @@ export default async function BillingSettingsPage() {
     redirect("/dashboard");
   }
   const refundReadiness = getRefundProviderReadiness();
+  const razorpayPublic = getRazorpayPublicConfig();
 
   const [
     membership,
@@ -84,24 +87,26 @@ export default async function BillingSettingsPage() {
     }),
   ]);
 
-  const price = subscription
-    ? await prisma.planPrice.findFirst({
-        where: {
-          planId: subscription.planId,
-          provider: "MANUAL",
-          currency: "INR",
-          interval: "year",
-          isActive: true,
-        },
-      })
-    : null;
+  const price = subscription?.priceId
+    ? await prisma.planPrice.findUnique({ where: { id: subscription.priceId } })
+    : subscription
+      ? await prisma.planPrice.findFirst({
+          where: {
+            planId: subscription.planId,
+            provider: "MANUAL",
+            isActive: true,
+          },
+          orderBy: [{ interval: "desc" }],
+        })
+      : null;
 
   const plan = getPlanDefinition(subscription?.plan?.code || entitlement.planCode);
   const billingCurrency =
     price?.currency && BILLING_CURRENCIES.includes(price.currency as "INR" | "USD")
       ? (price.currency as "INR" | "USD")
       : "INR";
-  const billingInterval = price?.interval === "year" ? "year" : "month";
+  const billingInterval =
+    price?.interval === "year" || price?.interval === "month" ? price.interval : "month";
   const currentPrice =
     billingInterval === "year"
       ? plan.pricing[billingCurrency].yearly
@@ -141,7 +146,10 @@ export default async function BillingSettingsPage() {
       description="Choose a plan that matches how you bill and remind clients. Paid workspace subscriptions and client checkout are processed securely with Razorpay."
     >
       <div className="space-y-6">
-        <SubscriptionSuccessBanner />
+        <BillingUpgradeCelebration />
+        <Suspense fallback={null}>
+          <SubscriptionSuccessBanner />
+        </Suspense>
         <BillingRefundBanner
           cancellation={
             latestCancellation && latestCancellationMeta?.cancelledAt
@@ -182,6 +190,23 @@ export default async function BillingSettingsPage() {
                 {entitlement.platformBypass
                   ? "Platform bypass active"
                   : `Subscription ${entitlement.subscriptionStatus.toLowerCase()}`}
+              </p>
+              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                <Link
+                  href="#workspace-plans"
+                  className="font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  View plans
+                </Link>
+                <span className="text-muted-foreground/50" aria-hidden>
+                  ·
+                </span>
+                <Link
+                  href="#workspace-plans"
+                  className="font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  Explore upgrades
+                </Link>
               </p>
             </div>
             <Link
@@ -224,8 +249,12 @@ export default async function BillingSettingsPage() {
 
         <WorkspacePlanCards
           currentPlanCode={plan.code}
+          hasActivePaidPlan={
+            plan.code !== "FREE" &&
+            (subscription?.status === "ACTIVE" || subscription?.status === "TRIALING")
+          }
           canManageBilling={["OWNER", "ADMIN"].includes(membership?.role || "")}
-          razorpayConfigured={getRazorpayPublicConfig().isConfigured}
+          razorpayConfigured={razorpayPublic.isConfigured}
           platformBypass={Boolean(entitlement.platformBypass)}
         />
 
