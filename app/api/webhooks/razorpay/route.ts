@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { BillingProvider } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { verifyRazorpayWebhookSignature } from "@/lib/payments/razorpay";
 import {
@@ -16,7 +17,8 @@ import {
   mergeSubscriptionNotesFromPayload,
   parseWorkspaceSubscriptionNotes,
 } from "@/lib/billing/subscription-checkout";
-import { normalizePlanCode } from "@/lib/billing/plans";
+import { normalizePlanCode, BILLING_INTERVALS } from "@/lib/billing/plans";
+import { provisionWorkspaceSubscription } from "@/lib/billing/subscriptions";
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
@@ -62,8 +64,286 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing event" }, { status: 422 });
   }
 
-  if (!["payment_link.paid", "payment_link.partially_paid", "payment.captured"].includes(event)) {
+  const HANDLED_EVENTS = [
+    "payment_link.paid",
+    "payment_link.partially_paid",
+    "payment.captured",
+    "subscription.activated",
+    "subscription.charged",
+    "subscription.halted",
+    "subscription.cancelled",
+    "subscription.completed",
+    "subscription.pending",
+  ];
+
+  if (!HANDLED_EVENTS.includes(event)) {
     return NextResponse.json({ ok: true, ignored: true });
+  }
+
+  // --- Handle Subscription events ---
+  if (event.startsWith("subscription.")) {
+    const subEntity = payload?.payload?.subscription?.entity;
+    const razorpaySubId = subEntity?.id as string | undefined;
+    const workspaceIdFromNotes = subEntity?.notes?.workspaceId as string | undefined;
+
+    if (!razorpaySubId) {
+      return NextResponse.json({ ok: true, ignored: true, reason: "no_subscription_id" });
+    }
+
+    try {
+      if (event === "subscription.activated") {
+        // Find subscription by providerSubId
+        const subscription = await prisma.subscription.findFirst({
+          where: { providerSubId: razorpaySubId },
+          include: { plan: true },
+        });
+
+        if (!subscription && workspaceIdFromNotes) {
+          // Subscription might not have providerSubId set yet (race with activate endpoint)
+          // Attempt to find by workspaceId
+          const subByWorkspace = await prisma.subscription.findUnique({
+            where: { workspaceId: workspaceIdFromNotes },
+            include: { plan: true },
+          });
+
+          if (subByWorkspace) {
+            const planCode = normalizePlanCode(subEntity?.notes?.planCode);
+            const interval: (typeof BILLING_INTERVALS)[number] =
+              subEntity?.notes?.billingInterval === "year" ? "year" : "month";
+            const currency = subEntity?.notes?.billingCurrency === "USD" ? "USD" : ("INR" as const);
+
+            const currentStart = subEntity?.current_start
+              ? new Date(subEntity.current_start * 1000)
+              : new Date();
+            const currentEnd = subEntity?.current_end
+              ? new Date(subEntity.current_end * 1000)
+              : null;
+
+            await provisionWorkspaceSubscription(workspaceIdFromNotes, {
+              planCode,
+              currency,
+              interval,
+            });
+
+            await prisma.subscription.update({
+              where: { workspaceId: workspaceIdFromNotes },
+              data: {
+                providerSubId: razorpaySubId,
+                provider: BillingProvider.RAZORPAY,
+                status: "ACTIVE",
+                currentPeriodStart: currentStart,
+                currentPeriodEnd: currentEnd,
+              },
+            });
+
+            await prisma.auditLog.create({
+              data: {
+                userId: "SYSTEM",
+                workspaceId: workspaceIdFromNotes,
+                action: "BILLING_SUBSCRIPTION_UPGRADED",
+                resourceType: "BILLING_SUBSCRIPTION",
+                metadata: {
+                  planCode,
+                  interval,
+                  currency,
+                  razorpaySubscriptionId: razorpaySubId,
+                  webhookEvent: event,
+                  activationSource: "webhook_subscription_activated",
+                  currentStart: currentStart.toISOString(),
+                  currentEnd: currentEnd?.toISOString() || null,
+                } as any,
+              },
+            });
+          }
+        }
+
+        return NextResponse.json({ ok: true, event });
+      }
+
+      if (event === "subscription.charged") {
+        const subscription = await prisma.subscription.findFirst({
+          where: { providerSubId: razorpaySubId },
+        });
+
+        if (subscription) {
+          // Extend period end. Use charge_at if available, else compute from current + interval
+          const chargeAt = subEntity?.charge_at ? new Date(subEntity.charge_at * 1000) : new Date();
+          const currentEnd = subEntity?.current_end ? new Date(subEntity.current_end * 1000) : null;
+
+          const newPeriodEnd = currentEnd || chargeAt;
+          const workspaceId = subscription.workspaceId;
+
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: {
+              status: "ACTIVE",
+              currentPeriodEnd: newPeriodEnd,
+              cancelAtPeriodEnd: false,
+            },
+          });
+
+          await prisma.auditLog.create({
+            data: {
+              userId: "SYSTEM",
+              workspaceId,
+              action: "BILLING_SUBSCRIPTION_RENEWED",
+              resourceType: "BILLING_SUBSCRIPTION",
+              metadata: {
+                razorpaySubscriptionId: razorpaySubId,
+                webhookEvent: event,
+                newPeriodEnd: newPeriodEnd.toISOString(),
+              } as any,
+            },
+          });
+        }
+
+        return NextResponse.json({ ok: true, event });
+      }
+
+      if (event === "subscription.halted") {
+        const subscription = await prisma.subscription.findFirst({
+          where: { providerSubId: razorpaySubId },
+          include: { workspace: true },
+        });
+
+        if (subscription) {
+          const workspaceId = subscription.workspaceId;
+
+          await provisionWorkspaceSubscription(workspaceId, { planCode: "FREE" });
+
+          await prisma.auditLog.create({
+            data: {
+              userId: "SYSTEM",
+              workspaceId,
+              action: "BILLING_SUBSCRIPTION_PAYMENT_FAILED",
+              resourceType: "BILLING_SUBSCRIPTION",
+              metadata: {
+                razorpaySubscriptionId: razorpaySubId,
+                webhookEvent: event,
+                downgradedTo: "FREE",
+              } as any,
+            },
+          });
+        }
+
+        return NextResponse.json({ ok: true, event });
+      }
+
+      if (event === "subscription.cancelled") {
+        const subscription = await prisma.subscription.findFirst({
+          where: { providerSubId: razorpaySubId },
+        });
+
+        if (subscription) {
+          const workspaceId = subscription.workspaceId;
+          const now = new Date();
+          const periodEnd = subscription.currentPeriodEnd;
+
+          // If already past period end, downgrade immediately; otherwise mark cancelAtPeriodEnd
+          if (!periodEnd || now >= periodEnd) {
+            await provisionWorkspaceSubscription(workspaceId, { planCode: "FREE" });
+
+            await prisma.auditLog.create({
+              data: {
+                userId: "SYSTEM",
+                workspaceId,
+                action: "BILLING_SUBSCRIPTION_CANCELLED_WEBHOOK",
+                resourceType: "BILLING_SUBSCRIPTION",
+                metadata: {
+                  razorpaySubscriptionId: razorpaySubId,
+                  webhookEvent: event,
+                  downgradedImmediately: true,
+                } as any,
+              },
+            });
+          } else {
+            await prisma.subscription.update({
+              where: { id: subscription.id },
+              data: { cancelAtPeriodEnd: true },
+            });
+
+            await prisma.auditLog.create({
+              data: {
+                userId: "SYSTEM",
+                workspaceId,
+                action: "BILLING_SUBSCRIPTION_CANCELLED_WEBHOOK",
+                resourceType: "BILLING_SUBSCRIPTION",
+                metadata: {
+                  razorpaySubscriptionId: razorpaySubId,
+                  webhookEvent: event,
+                  cancelAtPeriodEnd: true,
+                  periodEnd: periodEnd.toISOString(),
+                } as any,
+              },
+            });
+          }
+        }
+
+        return NextResponse.json({ ok: true, event });
+      }
+
+      if (event === "subscription.completed") {
+        const subscription = await prisma.subscription.findFirst({
+          where: { providerSubId: razorpaySubId },
+        });
+
+        if (subscription) {
+          const workspaceId = subscription.workspaceId;
+
+          await provisionWorkspaceSubscription(workspaceId, { planCode: "FREE" });
+
+          await prisma.auditLog.create({
+            data: {
+              userId: "SYSTEM",
+              workspaceId,
+              action: "BILLING_SUBSCRIPTION_COMPLETED",
+              resourceType: "BILLING_SUBSCRIPTION",
+              metadata: {
+                razorpaySubscriptionId: razorpaySubId,
+                webhookEvent: event,
+                completedAt: new Date().toISOString(),
+              } as any,
+            },
+          });
+        }
+
+        return NextResponse.json({ ok: true, event });
+      }
+
+      if (event === "subscription.pending") {
+        // Info only — log and return
+        const subscription = await prisma.subscription.findFirst({
+          where: { providerSubId: razorpaySubId },
+        });
+
+        if (subscription) {
+          await prisma.auditLog.create({
+            data: {
+              userId: "SYSTEM",
+              workspaceId: subscription.workspaceId,
+              action: "BILLING_SUBSCRIPTION_PENDING",
+              resourceType: "BILLING_SUBSCRIPTION",
+              metadata: {
+                razorpaySubscriptionId: razorpaySubId,
+                webhookEvent: event,
+              } as any,
+            },
+          });
+        }
+
+        return NextResponse.json({ ok: true, event });
+      }
+
+      return NextResponse.json({ ok: true, event });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Subscription webhook failed";
+      console.error("[Razorpay webhook] Subscription event handling failed:", {
+        event,
+        razorpaySubId,
+        message,
+      });
+      return NextResponse.json({ error: message }, { status: 422 });
+    }
   }
 
   const paymentLinkEntity =

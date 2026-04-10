@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { getServerSession } from "next-auth";
+import { BillingProvider } from "@prisma/client";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 import { ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
-import { createRazorpayPaymentLink, getRazorpayPublicConfig } from "@/lib/payments/razorpay";
+import {
+  createRazorpayPaymentLink,
+  createRazorpayCustomer,
+  createRazorpaySubscription,
+  getRazorpayPublicConfig,
+} from "@/lib/payments/razorpay";
 import { buildAppUrl } from "@/lib/app-url";
 import {
   BILLING_CURRENCIES,
@@ -99,6 +105,100 @@ export async function POST(req: NextRequest) {
   }
 
   const planMeta = getPlanDefinition(targetPlanCode);
+
+  // --- Try Razorpay Subscriptions API path ---
+  // Look for a stored Razorpay plan ID for this plan/currency/interval
+  const dbPlan = await prisma.subscriptionPlan.findUnique({ where: { code: targetPlanCode } });
+  const razorpayPrice = dbPlan
+    ? await prisma.planPrice.findFirst({
+        where: {
+          planId: dbPlan.id,
+          currency: body.currency,
+          interval: body.interval,
+          provider: BillingProvider.RAZORPAY,
+          isActive: true,
+          providerPriceId: { not: null },
+        },
+      })
+    : null;
+
+  if (razorpayPrice?.providerPriceId) {
+    // Subscriptions API path
+    try {
+      // Ensure customer exists
+      let customerId = subscription?.providerCustomerId || null;
+      if (!customerId && session.user.email) {
+        const customer = await createRazorpayCustomer({
+          name: session.user.name || undefined,
+          email: session.user.email,
+        });
+        customerId = customer.id;
+
+        // Persist the customer ID
+        if (subscription) {
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: { providerCustomerId: customerId },
+          });
+        }
+      }
+
+      // totalCount: monthly→60, yearly→5
+      const totalCount = body.interval === "year" ? 5 : 60;
+
+      const rzpSub = await createRazorpaySubscription({
+        planId: razorpayPrice.providerPriceId,
+        customerId: customerId || undefined,
+        totalCount,
+        notes: {
+          workspaceId: workspace.id,
+          planCode: targetPlanCode,
+          billingInterval: body.interval,
+          billingCurrency: body.currency,
+          purpose: "workspace_subscription",
+        },
+        notifyCustomer: true,
+      });
+
+      // Audit log for checkout started
+      await prisma.auditLog.create({
+        data: {
+          userId: session.user.id,
+          workspaceId: workspace.id,
+          action: "BILLING_CHECKOUT_STARTED",
+          resourceType: "BILLING_SUBSCRIPTION",
+          metadata: {
+            planCode: targetPlanCode,
+            interval: body.interval,
+            currency: body.currency,
+            amount: amountPaise,
+            razorpaySubscriptionId: rzpSub.id,
+            razorpayPlanId: razorpayPrice.providerPriceId,
+            checkoutMethod: "subscription",
+          } as any,
+        },
+      });
+
+      return NextResponse.json({
+        ok: true,
+        subscriptionId: rzpSub.id,
+        keyId: config.keyId,
+        prefill: {
+          email: session.user.email || "",
+          name: session.user.name || "",
+        },
+        description: `PaperChai ${planMeta.name} (${body.interval}ly) — ${workspace.name}`,
+        amount: amountPaise,
+        currency: body.currency,
+        interval: body.interval,
+      });
+    } catch (err) {
+      console.error("[checkout] Razorpay subscription creation failed, falling back:", err);
+      // Fall through to payment link fallback below
+    }
+  }
+
+  // --- Fallback: Payment Links path ---
   const referenceId = `pcs_${randomBytes(6).toString("hex")}`;
 
   const link = await createRazorpayPaymentLink({
@@ -125,6 +225,25 @@ export async function POST(req: NextRequest) {
     accept_partial: false,
     callback_url: buildAppUrl("/settings/billing?subscription=success"),
     callback_method: "get",
+  });
+
+  // Audit log for payment link checkout
+  await prisma.auditLog.create({
+    data: {
+      userId: session.user.id,
+      workspaceId: workspace.id,
+      action: "BILLING_CHECKOUT_STARTED",
+      resourceType: "BILLING_SUBSCRIPTION",
+      metadata: {
+        planCode: targetPlanCode,
+        interval: body.interval,
+        currency: body.currency,
+        amount: amountPaise,
+        referenceId,
+        paymentLinkId: link.id,
+        checkoutMethod: "payment_link",
+      } as any,
+    },
   });
 
   return NextResponse.json({

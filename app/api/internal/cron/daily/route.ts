@@ -12,6 +12,7 @@ const JOBS = [
   "/api/internal/scheduled-invoices/run",
   "/api/internal/automation/run",
   "/api/internal/recurring-invoices/run",
+  "/api/internal/billing/renewal-reminders",
 ] as const;
 
 export async function POST(req: NextRequest) {
