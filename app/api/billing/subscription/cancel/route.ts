@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 import { ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { deriveSubscriptionPeriodEnd, calculateProratedRefund } from "@/lib/billing/cancellation";
+import { sendSubscriptionCancelledEmail } from "@/lib/billing/emails";
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -46,6 +47,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Free plan does not need cancellation" }, { status: 409 });
   }
 
+  // 7-day cancellation policy: cancellations are only allowed within 7 days of purchase.
+  // After 7 days, the current month/year is non-refundable and cannot be cancelled mid-cycle.
+  const CANCELLATION_WINDOW_DAYS = 7;
+  const periodStart = subscription.currentPeriodStart;
+  if (periodStart) {
+    const daysSincePurchase =
+      (Date.now() - new Date(periodStart).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSincePurchase > CANCELLATION_WINDOW_DAYS) {
+      const windowEnds = new Date(periodStart);
+      windowEnds.setDate(windowEnds.getDate() + CANCELLATION_WINDOW_DAYS);
+      return NextResponse.json(
+        {
+          error: `Cancellations are only allowed within ${CANCELLATION_WINDOW_DAYS} days of purchase. The cancellation window closed on ${windowEnds.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}. Your plan will remain active until the end of the current billing period.`,
+          code: "CANCELLATION_WINDOW_EXPIRED",
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const price = subscription.priceId
     ? await prisma.planPrice.findUnique({ where: { id: subscription.priceId } })
     : await prisma.planPrice.findFirst({
@@ -58,7 +79,7 @@ export async function POST(req: NextRequest) {
       });
 
   const interval = price?.interval === "year" ? "year" : "month";
-  const periodStart = subscription.currentPeriodStart || new Date();
+  const billingPeriodStart = subscription.currentPeriodStart || new Date();
   const periodEnd = deriveSubscriptionPeriodEnd(
     subscription.currentPeriodStart,
     subscription.currentPeriodEnd,
@@ -75,7 +96,7 @@ export async function POST(req: NextRequest) {
   const cancelledAt = new Date();
   const proration = calculateProratedRefund({
     priceAmount: price?.amount || 0,
-    periodStart,
+    periodStart: billingPeriodStart,
     periodEnd,
     cancelledAt,
   });
@@ -127,7 +148,7 @@ export async function POST(req: NextRequest) {
         currency: price?.currency || "INR",
         interval,
         cancelledAt: cancelledAt.toISOString(),
-        billingPeriodStart: periodStart.toISOString(),
+        billingPeriodStart: billingPeriodStart.toISOString(),
         billingPeriodEnd: periodEnd.toISOString(),
         planAmount: price?.amount || 0,
         chargeForUsedPeriod: proration.chargeForUsedPeriod,
@@ -137,10 +158,27 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Send cancellation confirmation email (fire-and-forget)
+  const owner = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { email: true, name: true },
+  });
+  if (owner?.email) {
+    sendSubscriptionCancelledEmail({
+      ownerEmail: owner.email,
+      ownerName: owner.name || owner.email.split("@")[0],
+      workspaceName: workspace.name,
+      previousPlan: subscription.plan.code,
+      cancelledAt,
+      refundableAmount: proration.refundableAmount,
+      currency: price?.currency || "INR",
+    }).catch((err) => console.error("[billing/cancel] Failed to send cancellation email:", err));
+  }
+
   return NextResponse.json({
     ok: true,
     cancelledAt: cancelledAt.toISOString(),
-    billingPeriodStart: periodStart.toISOString(),
+    billingPeriodStart: billingPeriodStart.toISOString(),
     billingPeriodEnd: periodEnd.toISOString(),
     refund: {
       currency: price?.currency || "INR",

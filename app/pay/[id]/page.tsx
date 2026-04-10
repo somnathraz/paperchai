@@ -1,12 +1,18 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
-import { FileText, CheckCircle, AlertCircle, Clock } from "lucide-react";
+import { FileText, CheckCircle, AlertCircle, Clock, Loader2 } from "lucide-react";
 
-type Props = { params: { id: string } };
+type Props = {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ payment?: string }>;
+};
 
-export default async function PayInvoicePage({ params }: Props) {
+export default async function PayInvoicePage({ params, searchParams }: Props) {
+  const { id } = await params;
+  const { payment } = await searchParams;
+
   const invoice = await prisma.invoice.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: {
       client: { select: { name: true } },
       workspace: { select: { name: true, registeredEmail: true } },
@@ -17,7 +23,9 @@ export default async function PayInvoicePage({ params }: Props) {
 
   const isPaid = invoice.status === "paid";
   const isCancelled = invoice.status === "cancelled";
-  const total = Number(invoice.total).toLocaleString(undefined, {
+  const isPaymentCallback = payment === "success";
+
+  const total = Number(invoice.total).toLocaleString("en-IN", {
     style: "currency",
     currency: invoice.currency || "INR",
   });
@@ -64,12 +72,36 @@ export default async function PayInvoicePage({ params }: Props) {
             <AlertCircle className="h-5 w-5 shrink-0 text-slate-500" />
             <p className="text-sm text-slate-600">This invoice has been cancelled.</p>
           </div>
+        ) : isPaymentCallback ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+              <CheckCircle className="h-5 w-5 shrink-0 text-emerald-600" />
+              <div>
+                <p className="text-sm font-semibold text-emerald-800">Payment received!</p>
+                <p className="text-xs text-emerald-700 mt-0.5">
+                  Your payment is being processed. You&apos;ll receive a confirmation shortly.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+              Confirming payment with {invoice.workspace.name}…
+            </div>
+            <div className="rounded-xl border border-slate-100 p-4 text-sm text-slate-600">
+              <p className="font-medium text-slate-800">Payment details</p>
+              <p className="mt-1">
+                Invoice: <span className="font-mono">{invoice.number}</span>
+              </p>
+              <p>Client: {invoice.client?.name || "—"}</p>
+              {dueDate && <p>Due: {dueDate}</p>}
+            </div>
+          </div>
         ) : (
           <div className="space-y-4">
             <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
               <Clock className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
               <div>
-                <p className="text-sm font-semibold text-amber-800">Online payments coming soon</p>
+                <p className="text-sm font-semibold text-amber-800">Payment pending</p>
                 <p className="text-xs text-amber-700 mt-0.5">
                   Please contact{" "}
                   <a

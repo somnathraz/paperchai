@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { startOfMonth } from "date-fns";
 import { authOptions } from "@/lib/auth";
@@ -154,6 +155,15 @@ export default async function BillingSettingsPage() {
               : null
           }
         />
+
+        <div className="flex justify-end">
+          <Link
+            href="/settings/billing/history"
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition"
+          >
+            View billing history →
+          </Link>
+        </div>
 
         <div className="rounded-2xl border border-white/20 bg-white/70 p-6 shadow-[0_18px_60px_-40px_rgba(0,0,0,0.45)]">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

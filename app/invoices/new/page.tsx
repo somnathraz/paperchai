@@ -6,10 +6,12 @@ import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 
 type PageProps = {
-  searchParams: {
+  searchParams: Promise<{
     template?: string;
     id?: string;
-  };
+    projectId?: string;
+    clientId?: string;
+  }>;
 };
 
 export default async function NewInvoicePage({ searchParams }: PageProps) {
@@ -22,11 +24,11 @@ export default async function NewInvoicePage({ searchParams }: PageProps) {
     redirect("/login?callbackUrl=/invoices/new");
   }
 
+  const params = await searchParams;
   const firstName =
     session.user?.name?.split(" ")[0] ?? session.user?.email?.split("@")[0] ?? "there";
-  const templateSlug =
-    typeof searchParams.template === "string" ? searchParams.template : "classic-gray";
-  const invoiceId = typeof searchParams.id === "string" ? searchParams.id : undefined;
+  const templateSlug = typeof params.template === "string" ? params.template : "classic-gray";
+  const invoiceId = typeof params.id === "string" ? params.id : undefined;
 
   // If editing an existing invoice, hydrate initial data including sections from sendMeta
   let initialFormState = null;
