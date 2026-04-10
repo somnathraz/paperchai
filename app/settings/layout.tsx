@@ -1,3 +1,6 @@
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { DashboardLayout } from "@/components/dashboard/layout-shell";
 import { generateMetadata } from "@/lib/seo-config";
 
 export const metadata = generateMetadata({
@@ -8,6 +11,11 @@ export const metadata = generateMetadata({
   noIndex: true,
 });
 
-export default function SettingsLayout({ children }: { children: React.ReactNode }) {
-  return children;
+export default async function SettingsRootLayout({ children }: { children: React.ReactNode }) {
+  const session = await getServerSession(authOptions);
+  return (
+    <DashboardLayout userName={session?.user?.name} userEmail={session?.user?.email}>
+      {children}
+    </DashboardLayout>
+  );
 }

@@ -1,5 +1,3 @@
-"use server";
-
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -34,7 +32,7 @@ export async function GET() {
       billableItems: true,
       milestones: {
         where: {
-          status: 'READY_FOR_INVOICE',
+          status: "READY_FOR_INVOICE",
           invoiceId: null,
         },
         select: {
@@ -43,8 +41,8 @@ export async function GET() {
           description: true,
           amount: true,
           currency: true,
-        }
-      }
+        },
+      },
     },
   });
 

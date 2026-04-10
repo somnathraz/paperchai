@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   AlertCircle,
@@ -104,6 +105,7 @@ function riskBadgeClasses(risk: string) {
 }
 
 export function ReceivablesSection({ compact = false }: { compact?: boolean }) {
+  const router = useRouter();
   const [data, setData] = useState<ReceivablesResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -483,13 +485,14 @@ export function ReceivablesSection({ compact = false }: { compact?: boolean }) {
                         Record payment
                       </Button>
                       {invoice.clientId ? (
-                        <Button asChild size="sm">
-                          <Link
-                            href={`/clients?clientId=${invoice.clientId}`}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            Open client
-                          </Link>
+                        <Button
+                          size="sm"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            router.push(`/clients?clientId=${invoice.clientId}`);
+                          }}
+                        >
+                          Open client
                         </Button>
                       ) : null}
                     </div>

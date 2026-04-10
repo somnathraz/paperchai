@@ -30,6 +30,7 @@ const sections: {
       { label: "Workspace", href: "/settings/workspace", icon: Users },
       { label: "Workspace members", href: "/settings/members", icon: Users },
       { label: "Billing & subscription", href: "/settings/billing", icon: CreditCard },
+      { label: "Billing history", href: "/settings/billing/history", icon: CreditCard },
       { label: "Payment preferences", href: "/settings/payment", icon: Wallet },
     ],
   },
