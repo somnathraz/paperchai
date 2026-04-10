@@ -218,9 +218,19 @@ export async function createRazorpayCustomer(opts: {
 
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(
-      json?.error?.description || json?.error || "Failed to create Razorpay customer"
-    );
+    const description: string = json?.error?.description || "";
+    // Razorpay sometimes ignores fail_existing:0 and returns a 400.
+    // If the customer already exists, fetch them by email instead.
+    if (description.toLowerCase().includes("customer already exists")) {
+      const searchRes = await fetch(
+        `https://api.razorpay.com/v1/customers?email=${encodeURIComponent(opts.email)}&count=1`,
+        { headers: { Authorization: getAuthHeader() }, cache: "no-store" }
+      );
+      const searchJson = await searchRes.json().catch(() => ({}));
+      const existing = searchJson?.items?.[0];
+      if (existing?.id) return existing as RazorpayCustomerResponse;
+    }
+    throw new Error(description || json?.error || "Failed to create Razorpay customer");
   }
 
   return json as RazorpayCustomerResponse;
