@@ -17,23 +17,40 @@ type OpenCheckoutOptions = {
   onFailure: () => void;
 };
 
+// Singleton so multiple callers share the same in-flight load promise
+let _razorpayLoadPromise: Promise<boolean> | null = null;
+
 function loadRazorpayScript(): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (typeof window === "undefined") {
-      resolve(false);
-      return;
-    }
-    if ((window as any).Razorpay) {
-      resolve(true);
+  if (typeof window === "undefined") return Promise.resolve(false);
+
+  // Already loaded
+  if (typeof (window as any).Razorpay !== "undefined") return Promise.resolve(true);
+
+  // Already loading — reuse the in-flight promise
+  if (_razorpayLoadPromise) return _razorpayLoadPromise;
+
+  _razorpayLoadPromise = new Promise((resolve) => {
+    const existing = document.querySelector(
+      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+    );
+    if (existing) {
+      // Script tag exists but Razorpay not yet on window — wait for it
+      existing.addEventListener("load", () => resolve(true));
+      existing.addEventListener("error", () => resolve(false));
       return;
     }
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.async = true;
     script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
+    script.onerror = () => {
+      _razorpayLoadPromise = null; // allow retry next time
+      resolve(false);
+    };
     document.body.appendChild(script);
   });
+
+  return _razorpayLoadPromise;
 }
 
 export function useRazorpaySubscriptionCheckout() {
