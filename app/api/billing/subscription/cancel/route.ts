@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import { BillingProvider } from "@prisma/client";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 import { ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
 import { deriveSubscriptionPeriodEnd, calculateProratedRefund } from "@/lib/billing/cancellation";
 import { sendSubscriptionCancelledEmail } from "@/lib/billing/emails";
+import { cancelRazorpaySubscription } from "@/lib/payments/razorpay";
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -157,6 +159,13 @@ export async function POST(req: NextRequest) {
       } as any,
     },
   });
+
+  // Cancel Razorpay subscription if applicable (fire-and-forget, don't fail if it errors)
+  if (subscription.providerSubId && subscription.provider === BillingProvider.RAZORPAY) {
+    cancelRazorpaySubscription(subscription.providerSubId).catch((err) =>
+      console.error("[billing/cancel] Failed to cancel Razorpay subscription:", err)
+    );
+  }
 
   // Send cancellation confirmation email (fire-and-forget)
   const owner = await prisma.user.findUnique({

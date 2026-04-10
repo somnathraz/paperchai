@@ -12,6 +12,7 @@ import {
   isPlanDowngrade,
   isPlanUpgrade,
 } from "@/lib/billing/plans";
+import { useRazorpaySubscriptionCheckout } from "@/components/settings/razorpay-checkout";
 
 const PUBLIC_PLAN_ORDER: PlanCode[] = ["FREE", "PREMIUM", "PREMIER"];
 
@@ -41,6 +42,8 @@ export function WorkspacePlanCards({
   const [currency, setCurrency] = useState<(typeof BILLING_CURRENCIES)[number]>("INR");
   const [loadingPlan, setLoadingPlan] = useState<PlanCode | null>(null);
 
+  const { openCheckout } = useRazorpaySubscriptionCheckout();
+
   const startCheckout = async (target: PlanCode) => {
     if (target === "FREE" || !canManageBilling || platformBypass || !razorpayConfigured) return;
     if (!isPlanUpgrade(currentPlanCode, target)) return;
@@ -60,14 +63,46 @@ export function WorkspacePlanCards({
       if (!res.ok) {
         throw new Error(data.error || "Could not start checkout");
       }
-      const url = data.paymentLinkUrl as string | undefined;
-      if (!url) {
-        throw new Error("No payment link returned");
+
+      if (data.paymentLinkUrl) {
+        // Fallback: redirect (plans not synced to Razorpay yet)
+        window.location.href = data.paymentLinkUrl;
+      } else if (data.subscriptionId && data.keyId) {
+        // Razorpay Subscriptions API: open modal
+        await openCheckout({
+          subscriptionId: data.subscriptionId,
+          keyId: data.keyId,
+          prefill: data.prefill,
+          description: data.description,
+          onSuccess: async (response) => {
+            setLoadingPlan(target); // show spinner while activating
+            const activateRes = await fetch("/api/billing/subscription/activate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_subscription_id: response.razorpay_subscription_id,
+                razorpay_signature: response.razorpay_signature,
+              }),
+            });
+            if (activateRes.ok) {
+              toast.success("Plan activated! Loading your new features\u2026");
+              setTimeout(() => window.location.reload(), 800);
+            } else {
+              toast.success("Payment done! Your plan will activate shortly.");
+              setTimeout(() => window.location.reload(), 2000);
+            }
+          },
+          onFailure: () => {
+            toast.error("Payment was cancelled.");
+            setLoadingPlan(null);
+          },
+        });
+      } else {
+        throw new Error("No payment method returned");
       }
-      window.location.href = url;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Checkout failed");
-    } finally {
       setLoadingPlan(null);
     }
   };
