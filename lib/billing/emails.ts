@@ -234,3 +234,96 @@ export async function sendSubscriptionUpgradedEmail(opts: {
     html,
   });
 }
+
+// ── Subscription renewal reminder ────────────────────────────────────────────
+
+export async function sendSubscriptionRenewalReminderEmail(opts: {
+  ownerEmail: string;
+  ownerName: string;
+  workspaceName: string;
+  planName: string;
+  renewalDate: Date;
+  amount: number;
+  currency: string;
+  daysUntilRenewal: number; // 5 or 1
+}) {
+  const fmt = new Intl.NumberFormat(opts.currency === "INR" ? "en-IN" : "en-US", {
+    style: "currency",
+    currency: opts.currency,
+    minimumFractionDigits: 0,
+  });
+  const amountStr = fmt.format(opts.amount / 100);
+  const renewalDateStr = opts.renewalDate.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const billingUrl = buildAppUrl("/settings/billing");
+  const isLastDay = opts.daysUntilRenewal === 1;
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:40px 16px">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden;max-width:560px">
+        <!-- header -->
+        <tr><td style="background:#0f172a;padding:28px 32px">
+          <p style="margin:0;font-size:18px;font-weight:700;color:#fff">
+            ${isLastDay ? "⏰ Renewing tomorrow" : "📅 Renewal in 5 days"}
+          </p>
+          <p style="margin:6px 0 0;font-size:13px;color:#94a3b8">${opts.workspaceName}</p>
+        </td></tr>
+        <!-- body -->
+        <tr><td style="padding:32px">
+          <p style="margin:0 0 8px;font-size:14px;color:#64748b">Hi ${opts.ownerName},</p>
+          <p style="margin:0 0 24px;font-size:15px;color:#1e293b">
+            Your <strong>${opts.planName}</strong> subscription for
+            <strong>${opts.workspaceName}</strong> will automatically renew
+            <strong>${isLastDay ? "tomorrow" : "in 5 days"}</strong> on ${renewalDateStr}.
+          </p>
+          <!-- amount box -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;margin-bottom:24px">
+            <tr><td style="padding:20px;text-align:center">
+              <p style="margin:0;font-size:13px;color:#1d4ed8">Renewal amount</p>
+              <p style="margin:4px 0 0;font-size:32px;font-weight:700;color:#1e3a8a">${amountStr}</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#2563eb">
+                Will be charged on ${renewalDateStr}
+              </p>
+            </td></tr>
+          </table>
+          <p style="margin:0 0 24px;font-size:14px;color:#64748b">
+            If you'd like to cancel before renewal, you can manage your subscription below.
+            Note: cancellations are only eligible for a refund within <strong>7 days of purchase</strong>.
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr><td align="center">
+              <a href="${billingUrl}"
+                 style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-size:14px;font-weight:600">
+                Manage subscription →</a>
+            </td></tr>
+          </table>
+        </td></tr>
+        <!-- footer -->
+        <tr><td style="padding:20px 32px;border-top:1px solid #f1f5f9;text-align:center">
+          <p style="margin:0;font-size:12px;color:#94a3b8">
+            PaperChai · Automated billing reminder ·
+            <a href="${billingUrl}" style="color:#94a3b8">Manage subscription</a>
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return sendEmail({
+    to: opts.ownerEmail,
+    subject: isLastDay
+      ? `⏰ Your ${opts.planName} plan renews tomorrow — ${amountStr}`
+      : `📅 Your ${opts.planName} plan renews in 5 days — ${amountStr}`,
+    html,
+  });
+}

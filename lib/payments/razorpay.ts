@@ -32,30 +32,21 @@ type RazorpayPaymentLinkResponse = {
   reference_id?: string;
 };
 
-/**
- * Resolve Key ID and secret from env. Supports Razorpay’s usual names plus common aliases.
- * Key ID: RAZORPAY_KEY_ID or RAZORPAY_API_KEY
- * Secret: RAZORPAY_KEY_SECRET or RAZORPAY_SECRET (and RAZORPAY_SECRECT typo)
- */
-export function getRazorpayKeyCredentials() {
-  const keyId = (process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_API_KEY || "").trim();
-  const keySecret = (
-    process.env.RAZORPAY_KEY_SECRET ||
-    process.env.RAZORPAY_SECRET ||
-    process.env.RAZORPAY_SECRECT ||
-    ""
-  ).trim();
-  return { keyId, keySecret };
-}
-
 function getRazorpayConfig() {
-  const { keyId, keySecret } = getRazorpayKeyCredentials();
-  const webhookSecret = (process.env.RAZORPAY_WEBHOOK_SECRET || "").trim();
+  // Support multiple common env var naming conventions
+  const keyId =
+    process.env.RAZORPAY_KEY_ID ||
+    process.env.RAZORPAY_API_KEY ||
+    process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
+    process.env.NEXT_PUBLIC_RAZORPAY_API_KEY;
+  const keySecret =
+    process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || process.env.RAZORPAY_SECRECT; // typo alias kept for backward compat
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
   return {
-    keyId: keyId || undefined,
-    keySecret: keySecret || undefined,
-    webhookSecret: webhookSecret || undefined,
+    keyId,
+    keySecret,
+    webhookSecret,
     isConfigured: Boolean(keyId && keySecret),
     isWebhookConfigured: Boolean(webhookSecret),
   };
@@ -113,7 +104,7 @@ export function verifyRazorpayCheckoutSignature({
 }) {
   const { keySecret } = getRazorpayConfig();
   if (!keySecret) {
-    throw new Error("Razorpay key secret is not configured");
+    throw new Error("RAZORPAY_KEY_SECRET is not configured");
   }
   const expected = createHmacSignature(`${orderId}|${paymentId}`, keySecret);
   return expected === signature;
