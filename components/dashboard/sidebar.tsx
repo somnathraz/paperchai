@@ -11,6 +11,7 @@ import {
   Settings,
   FolderKanban,
   ChevronDown,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -40,7 +41,7 @@ export function SidebarContent({
 
   return (
     <div
-      className={`relative flex h-full w-full max-w-full flex-col overflow-x-hidden bg-white/80/70 py-6 backdrop-blur-xl ${className}`}
+      className={`relative flex min-h-full w-full max-w-full flex-col overflow-x-hidden bg-white/80/70 py-6 backdrop-blur-xl ${className}`}
     >
       <div className="flex items-center gap-3 px-6">
         <img src="/favicon.png" alt="PaperChai Icon" className="h-12 w-12 rounded-xl" />
@@ -141,6 +142,21 @@ export function SidebarContent({
         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Automation</p>
         <p className="mt-2 font-semibold text-foreground">Autopilot is live</p>
         <p className="text-xs text-muted-foreground">Reminders are running on schedule.</p>
+      </div>
+
+      {/* Upgrade plan button */}
+      <div className="mx-4 mt-4 mb-2">
+        <Link
+          href="/settings/billing"
+          onClick={onNavigate}
+          className="flex items-center gap-2 w-full rounded-2xl bg-gradient-to-r from-primary via-emerald-500 to-primary px-4 py-3 text-sm font-semibold text-white shadow-[0_16px_50px_-20px_rgba(16,185,129,0.55)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_60px_-20px_rgba(16,185,129,0.65)]"
+        >
+          <Zap className="h-4 w-4 shrink-0" />
+          <span className="flex-1">Upgrade plan</span>
+          <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+            View
+          </span>
+        </Link>
       </div>
     </div>
   );
