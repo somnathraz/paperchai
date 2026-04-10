@@ -258,4 +258,3 @@ export default async function BillingSettingsPage() {
     </SettingsLayout>
   );
 }
-const refundReadiness = getRefundProviderReadiness();
