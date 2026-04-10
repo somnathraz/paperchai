@@ -1,20 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import { randomBytes } from "crypto";
+import { getServerSession } from "next-auth";
+import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
 import { ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
+import { createRazorpayPaymentLink, getRazorpayPublicConfig } from "@/lib/payments/razorpay";
+import { buildAppUrl } from "@/lib/app-url";
 import {
   BILLING_CURRENCIES,
   BILLING_INTERVALS,
+  getPlanDefinition,
+  isPlanUpgrade,
   normalizePlanCode,
   PlanCode,
-  isPlanUpgrade,
-  getPlanDefinition,
 } from "@/lib/billing/plans";
-import { getWorkspaceEntitlement } from "@/lib/entitlements";
-import { createRazorpayPaymentLink, getRazorpayPublicConfig } from "@/lib/payments/razorpay";
-import { checkRateLimitByProfile } from "@/lib/security/rate-limit-enhanced";
+import { getExpectedSubscriptionAmountPaise } from "@/lib/billing/subscription-checkout";
+
+const bodySchema = z.object({
+  planCode: z.enum(["PREMIUM", "PREMIER"]),
+  interval: z.enum(BILLING_INTERVALS),
+  currency: z.enum(BILLING_CURRENCIES),
+});
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -30,107 +38,98 @@ export async function POST(req: NextRequest) {
   const membership = await getWorkspaceMembership(session.user.id, workspace.id);
   if (!membership || !["OWNER", "ADMIN"].includes(membership.role)) {
     return NextResponse.json(
-      { error: "Only workspace owners or admins can manage billing" },
+      { error: "Only workspace owners or admins can change the subscription" },
       { status: 403 }
     );
   }
 
-  const rateLimit = checkRateLimitByProfile(req, "general", `ws:${workspace.id}:billing-checkout`);
+  const rateLimit = checkRateLimitByProfile(
+    req,
+    "general",
+    `ws:${workspace.id}:subscription-checkout`
+  );
   if (!rateLimit.allowed) {
     return NextResponse.json({ error: rateLimit.error || "Rate limit exceeded" }, { status: 429 });
   }
 
-  const { keyId, isConfigured } = getRazorpayPublicConfig();
-  if (!isConfigured) {
-    return NextResponse.json({ error: "Payment gateway not configured" }, { status: 503 });
+  const config = getRazorpayPublicConfig();
+  if (!config.isConfigured) {
+    return NextResponse.json(
+      { error: "Razorpay is not configured on the server" },
+      { status: 503 }
+    );
   }
 
-  let body: { planCode?: string; interval?: string; currency?: string };
+  let body: z.infer<typeof bodySchema>;
   try {
-    body = await req.json();
+    const json = await req.json();
+    body = bodySchema.parse(json);
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const planCode = normalizePlanCode(body.planCode) as PlanCode;
-  const interval: (typeof BILLING_INTERVALS)[number] = body.interval === "year" ? "year" : "month";
-  const currency: (typeof BILLING_CURRENCIES)[number] = body.currency === "USD" ? "USD" : "INR";
+  const subscription = await prisma.subscription.findUnique({
+    where: { workspaceId: workspace.id },
+    include: { plan: true },
+  });
+  const currentPlanCode = normalizePlanCode(subscription?.plan?.code);
+  const targetPlanCode = normalizePlanCode(body.planCode) as PlanCode;
 
-  if (planCode === "FREE") {
-    return NextResponse.json({ error: "Cannot checkout to free plan" }, { status: 400 });
+  if (targetPlanCode !== "PREMIUM" && targetPlanCode !== "PREMIER") {
+    return NextResponse.json({ error: "Invalid target plan" }, { status: 400 });
   }
 
-  const entitlement = await getWorkspaceEntitlement(workspace.id, session.user.id);
-  if (!isPlanUpgrade(entitlement.planCode, planCode)) {
+  if (!isPlanUpgrade(currentPlanCode, targetPlanCode)) {
     return NextResponse.json(
-      { error: "Target plan is not an upgrade from current plan" },
+      {
+        error:
+          "You can only upgrade to a higher tier here. To downgrade or cancel, use the options below.",
+      },
       { status: 409 }
     );
   }
 
-  const plan = getPlanDefinition(planCode);
-  const amount =
-    interval === "year" ? plan.pricing[currency].yearly : plan.pricing[currency].monthly;
-
-  if (amount <= 0) {
-    return NextResponse.json({ error: "Plan amount is zero" }, { status: 400 });
+  const amountPaise = getExpectedSubscriptionAmountPaise(
+    targetPlanCode,
+    body.currency,
+    body.interval
+  );
+  if (amountPaise <= 0) {
+    return NextResponse.json({ error: "Invalid plan amount" }, { status: 400 });
   }
 
-  // Generate a unique reference ID for this checkout attempt
+  const planMeta = getPlanDefinition(targetPlanCode);
   const referenceId = `pcs_${randomBytes(6).toString("hex")}`;
 
-  // Get owner details for the payment link customer info
-  const owner = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { email: true, name: true },
-  });
-
-  const callbackBase = process.env.NEXT_PUBLIC_APP_URL || "https://localhost:3000";
-  const callbackUrl = `${callbackBase}/settings/billing?subscription=success`;
-
-  const paymentLink = await createRazorpayPaymentLink({
-    amount,
-    currency,
-    description: `${plan.name} plan · ${interval === "year" ? "Annual" : "Monthly"} subscription`,
+  const link = await createRazorpayPaymentLink({
+    amount: amountPaise,
+    currency: body.currency,
+    description: `PaperChai ${planMeta.name} (${body.interval}ly) — ${workspace.name}`,
     reference_id: referenceId,
-    customer: owner?.email
-      ? {
-          name: owner.name || undefined,
-          email: owner.email,
-        }
-      : undefined,
-    notify: { email: true, sms: false },
-    reminder_enable: false,
-    notes: {
-      purpose: "workspace_subscription",
-      workspaceId: workspace.id,
-      planCode,
-      billingInterval: interval,
-      billingCurrency: currency,
-      referenceId,
+    customer: {
+      name: session.user.name || undefined,
+      email: session.user.email || undefined,
     },
-    callback_url: callbackUrl,
+    notify: {
+      email: true,
+      sms: false,
+    },
+    reminder_enable: true,
+    notes: {
+      workspaceId: workspace.id,
+      planCode: targetPlanCode,
+      billingInterval: body.interval,
+      billingCurrency: body.currency,
+      purpose: "workspace_subscription",
+    },
+    accept_partial: false,
+    callback_url: buildAppUrl("/settings/billing?subscription=success"),
     callback_method: "get",
   });
 
-  // Record checkout intent for activation lookup
-  await prisma.auditLog.create({
-    data: {
-      userId: session.user.id,
-      workspaceId: workspace.id,
-      action: "BILLING_CHECKOUT_STARTED",
-      resourceType: "BILLING_SUBSCRIPTION",
-      metadata: {
-        referenceId,
-        planCode,
-        interval,
-        currency,
-        amount,
-        paymentLinkId: paymentLink.id,
-        paymentLinkUrl: paymentLink.short_url,
-      } as any,
-    },
+  return NextResponse.json({
+    ok: true,
+    paymentLinkUrl: link.short_url,
+    referenceId,
   });
-
-  return NextResponse.json({ paymentLinkUrl: paymentLink.short_url });
 }

@@ -1,3 +1,5 @@
+import { getRazorpayKeyCredentials } from "@/lib/payments/razorpay";
+
 type RazorpayRefundResult = {
   id: string;
   amount: number;
@@ -9,8 +11,7 @@ type RazorpayRefundResult = {
 };
 
 function getRazorpayRefundConfig() {
-  const keyId = process.env.RAZORPAY_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  const { keyId, keySecret } = getRazorpayKeyCredentials();
   return {
     keyId,
     keySecret,

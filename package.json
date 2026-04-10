@@ -21,6 +21,7 @@
     "test:slack-commands": "node scripts/smoke-slack-commands.js",
     "test:reminders-e2e": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/smoke-reminders-e2e.ts",
     "db:list-users": "node scripts/list-users-and-access.js",
+    "db:migrate:prod": "node scripts/prisma-migrate-prod.js",
     "test:slack": "npm run test:slack-unit && npm run test:slack-commands",
     "test:slack-unit": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/slack-command-parser.test.ts && ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/slack-validation.test.ts && ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/slack-signature.test.ts",
     "ngrok": "ngrok http 3000",
