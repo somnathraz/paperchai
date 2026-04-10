@@ -27,6 +27,8 @@ function formatMoney(amount: number, currency: string) {
   }).format(amount / 100);
 }
 
+const refundReadiness = getRefundProviderReadiness();
+
 export default async function BillingSettingsPage() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {

@@ -18,7 +18,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { sections } from "@/components/settings/settings-sidebar";
-import { useState } from "react";
 
 const links = [
   { label: "Dashboard", icon: Home, href: "/dashboard" },
