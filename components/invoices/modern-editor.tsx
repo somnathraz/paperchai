@@ -192,7 +192,9 @@ export function ModernEditor({
           paymentLinkUrl: workspaceSettings?.paymentLinkBaseUrl || prev.paymentLinkUrl,
         }));
       }
-      setRazorpayConfigured(Boolean(process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID));
+      setRazorpayConfigured(
+        Boolean(process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_API_KEY)
+      );
     };
     load();
   }, [initialFormState]);

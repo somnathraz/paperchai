@@ -17,6 +17,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { sections } from "@/components/settings/settings-sidebar";
+import { useState } from "react";
 
 const links = [
   { label: "Dashboard", icon: Home, href: "/dashboard" },
@@ -153,14 +154,14 @@ export function SidebarContent({
       {/* Upgrade plan button */}
       <div className="mx-4 mt-4 mb-2">
         <Link
-          href="/settings/billing"
+          href="/settings/billing#workspace-plans"
           onClick={onNavigate}
           className="flex items-center gap-2 w-full rounded-2xl bg-gradient-to-r from-primary via-emerald-500 to-primary px-4 py-3 text-sm font-semibold text-white shadow-[0_16px_50px_-20px_rgba(16,185,129,0.55)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_60px_-20px_rgba(16,185,129,0.65)]"
         >
           <Zap className="h-4 w-4 shrink-0" />
-          <span className="flex-1">Upgrade plan</span>
+          <span className="flex-1">Level up</span>
           <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-            View
+            Plans
           </span>
         </Link>
       </div>

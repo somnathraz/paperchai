@@ -9,14 +9,14 @@ import {
   recordPaymentEvent,
 } from "@/lib/payments/provider-events";
 import { recordInvoicePayment } from "@/lib/invoices/record-payment";
-import { sendPaymentReceivedEmail, sendSubscriptionUpgradedEmail } from "@/lib/billing/emails";
-import { provisionWorkspaceSubscription } from "@/lib/billing/subscriptions";
+import { sendPaymentReceivedEmail } from "@/lib/billing/emails";
 import {
-  normalizePlanCode,
-  PlanCode,
-  BILLING_INTERVALS,
-  BILLING_CURRENCIES,
-} from "@/lib/billing/plans";
+  applyWorkspaceSubscriptionFromPayment,
+  getExpectedSubscriptionAmountPaise,
+  mergeSubscriptionNotesFromPayload,
+  parseWorkspaceSubscriptionNotes,
+} from "@/lib/billing/subscription-checkout";
+import { normalizePlanCode } from "@/lib/billing/plans";
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
@@ -109,103 +109,156 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, duplicate: true });
   }
 
-  // ── Subscription upgrade payment ────────────────────────────────────────────
-  const purpose = paymentLinkEntity?.notes?.purpose || paymentEntity?.notes?.purpose || null;
+  const mergedNotes = mergeSubscriptionNotesFromPayload(paymentLinkEntity, paymentEntity);
+  const subscriptionCheckout = parseWorkspaceSubscriptionNotes(mergedNotes);
 
-  if (purpose === "workspace_subscription" && workspaceId) {
-    const rawPlanCode =
-      paymentLinkEntity?.notes?.planCode || paymentEntity?.notes?.planCode || null;
-    const rawInterval =
-      paymentLinkEntity?.notes?.billingInterval || paymentEntity?.notes?.billingInterval || null;
-    const rawCurrency =
-      paymentLinkEntity?.notes?.billingCurrency || paymentEntity?.notes?.billingCurrency || null;
+  if (subscriptionCheckout && !invoiceId && workspaceId === subscriptionCheckout.workspaceId) {
+    const effectivePaymentId =
+      paymentId || (linkId ? `link_${linkId}` : null) || `sub-${webhookEvent.id}`;
+    const paidPaise = Number(
+      paymentEntity?.amount ?? paymentLinkEntity?.amount ?? paymentLinkEntity?.amount_paid ?? 0
+    );
+    const subEventKey = `razorpay:workspace_subscription:${effectivePaymentId}:${subscriptionCheckout.workspaceId}`;
+    const existingSubPayment = await prisma.paymentEvent.findUnique({
+      where: { eventKey: subEventKey },
+    });
+    if (existingSubPayment?.status === "PAID") {
+      await finalizeWebhookEventRecord(webhookEvent.id, "DUPLICATE", {
+        reason: "subscription_payment_duplicate",
+        result: { duplicate: true },
+        workspaceId,
+        invoiceId: null,
+        externalPaymentId: paymentId,
+        externalLinkId: linkId,
+        externalRefundId: refundId,
+      });
+      return NextResponse.json({ ok: true, duplicate: true });
+    }
 
-    const planCode = normalizePlanCode(rawPlanCode) as PlanCode;
-    const interval: (typeof BILLING_INTERVALS)[number] = rawInterval === "year" ? "year" : "month";
-    const currency: (typeof BILLING_CURRENCIES)[number] = rawCurrency === "USD" ? "USD" : "INR";
+    const planCode = normalizePlanCode(subscriptionCheckout.planCode);
+    const expectedPaise = getExpectedSubscriptionAmountPaise(
+      planCode,
+      subscriptionCheckout.billingCurrency,
+      subscriptionCheckout.billingInterval
+    );
+
+    if (paidPaise <= 0 || paidPaise !== expectedPaise) {
+      await finalizeWebhookEventRecord(webhookEvent.id, "IGNORED", {
+        reason: "subscription_amount_mismatch",
+        result: {
+          ignored: true,
+          expectedPaise,
+          paidPaise,
+          planCode,
+        },
+        workspaceId,
+        invoiceId: null,
+        externalPaymentId: paymentId,
+        externalLinkId: linkId,
+        externalRefundId: refundId,
+      });
+      await createPaymentSecurityAudit({
+        action: "PAYMENT_WEBHOOK_REJECTED",
+        workspaceId,
+        resourceType: "WEBHOOK",
+        resourceId: webhookEvent.id,
+        metadata: {
+          provider: "razorpay",
+          reason: "subscription_amount_mismatch",
+          event,
+          expectedPaise,
+          paidPaise,
+          planCode,
+        },
+      });
+      return NextResponse.json({ ok: true, ignored: true, reason: "subscription_amount_mismatch" });
+    }
 
     try {
+      await applyWorkspaceSubscriptionFromPayment({
+        workspaceId: subscriptionCheckout.workspaceId,
+        planCode,
+        currency: subscriptionCheckout.billingCurrency,
+        interval: subscriptionCheckout.billingInterval,
+        expectedAmountPaise: expectedPaise,
+        paidAmountPaise: paidPaise,
+        paymentId,
+        linkId,
+        webhookEventId: webhookEvent.id,
+      });
+
       const periodStart = new Date();
       const periodEnd = new Date(periodStart);
-      if (interval === "year") {
+      if (subscriptionCheckout.billingInterval === "year") {
         periodEnd.setFullYear(periodEnd.getFullYear() + 1);
       } else {
         periodEnd.setMonth(periodEnd.getMonth() + 1);
       }
-
-      await provisionWorkspaceSubscription(workspaceId, { planCode, currency, interval });
-
-      // Set the billing period end explicitly
       await prisma.subscription.update({
-        where: { workspaceId },
+        where: { workspaceId: subscriptionCheckout.workspaceId },
         data: { currentPeriodStart: periodStart, currentPeriodEnd: periodEnd },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          workspaceId,
-          action: "BILLING_SUBSCRIPTION_UPGRADED",
-          resourceType: "BILLING_SUBSCRIPTION",
-          metadata: {
-            planCode,
-            interval,
-            currency,
-            paymentId,
-            purpose: "workspace_subscription",
-            upgradedAt: periodStart.toISOString(),
-            periodEnd: periodEnd.toISOString(),
-          } as any,
+      await recordPaymentEvent({
+        provider: "razorpay",
+        eventType: event,
+        eventKey: subEventKey,
+        direction: "INBOUND",
+        status: "PAID",
+        externalPaymentId: paymentId,
+        externalLinkId: linkId,
+        workspaceId: subscriptionCheckout.workspaceId,
+        invoiceId: null,
+        amount: paidPaise,
+        currency: subscriptionCheckout.billingCurrency,
+        metadata: {
+          kind: "workspace_subscription",
+          planCode,
+          webhookEventId: webhookEvent.id,
         },
       });
 
       await finalizeWebhookEventRecord(webhookEvent.id, "PROCESSED", {
         reason: null,
-        result: { planCode, interval, upgraded: true },
+        result: {
+          subscription: true,
+          planCode,
+          amountPaise: paidPaise,
+          upgraded: true,
+        },
         workspaceId,
         invoiceId: null,
         externalPaymentId: paymentId,
         externalLinkId: linkId,
-        externalRefundId: null,
+        externalRefundId: refundId,
       });
 
-      // Fire-and-forget upgrade email to workspace owner
-      const owner = await prisma.workspaceMember.findFirst({
-        where: { workspaceId, role: "OWNER", removedAt: null },
-        select: { user: { select: { email: true, name: true } } },
-      });
-      const workspace = await prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { name: true },
-      });
-      if (owner?.user?.email) {
-        const amountPaise = Number(paymentEntity?.amount || paymentLinkEntity?.amount || 0);
-        sendSubscriptionUpgradedEmail({
-          ownerEmail: owner.user.email,
-          ownerName: owner.user.name || owner.user.email.split("@")[0],
-          workspaceName: workspace?.name || "Your workspace",
-          newPlan: planCode,
-          billingInterval: interval,
-          amount: amountPaise,
-          currency,
-        }).catch((err) => console.error("[Razorpay webhook] Failed to send upgrade email:", err));
-      }
-
-      return NextResponse.json({ ok: true, upgraded: true, planCode });
+      return NextResponse.json({ ok: true, subscription: true, upgraded: true, planCode });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Subscription upgrade failed";
-      console.error("[Razorpay webhook] Subscription upgrade failed:", {
-        workspaceId,
-        planCode,
-        message,
-      });
+      const message = error instanceof Error ? error.message : "Subscription webhook failed";
+      console.error("Razorpay subscription webhook failed:", { event, workspaceId, message });
       await finalizeWebhookEventRecord(webhookEvent.id, "FAILED", {
-        reason: "subscription_upgrade_failed",
+        reason: "subscription_processing_failed",
         result: { error: message },
         workspaceId,
         invoiceId: null,
         externalPaymentId: paymentId,
         externalLinkId: linkId,
-        externalRefundId: null,
+        externalRefundId: refundId,
+      });
+      await createPaymentSecurityAudit({
+        action: "PAYMENT_WEBHOOK_FAILED",
+        workspaceId,
+        resourceType: "WEBHOOK",
+        resourceId: webhookEvent.id,
+        metadata: {
+          provider: "razorpay",
+          reason: "subscription_processing_failed",
+          event,
+          paymentId,
+          linkId,
+          error: message,
+        },
       });
       return NextResponse.json({ error: message }, { status: 422 });
     }

@@ -6,12 +6,8 @@ import { authOptions } from "@/lib/auth";
 import { SettingsLayout } from "@/components/settings/settings-layout";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
-import {
-  BILLING_CURRENCIES,
-  PLAN_DEFINITIONS,
-  PlanCode,
-  getPlanDefinition,
-} from "@/lib/billing/plans";
+import { BILLING_CURRENCIES, getPlanDefinition } from "@/lib/billing/plans";
+import { getRazorpayPublicConfig } from "@/lib/payments/razorpay";
 import { getWorkspaceEntitlement } from "@/lib/entitlements";
 import { deriveSubscriptionPeriodEnd, calculateProratedRefund } from "@/lib/billing/cancellation";
 import { SubscriptionCancelCard } from "@/components/settings/subscription-cancel-card";
@@ -20,6 +16,7 @@ import { BillingEventsCard } from "@/components/settings/billing-events-card";
 import { BillingRefundActionsCard } from "@/components/settings/billing-refund-actions-card";
 import { getRefundProviderReadiness } from "@/lib/billing/provider-refunds";
 import { SubscriptionSuccessBanner } from "@/components/settings/subscription-success-banner";
+import { WorkspacePlanCards } from "@/components/settings/workspace-plan-cards";
 
 function formatMoney(amount: number, currency: string) {
   return new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-US", {
@@ -29,8 +26,6 @@ function formatMoney(amount: number, currency: string) {
     maximumFractionDigits: 0,
   }).format(amount / 100);
 }
-
-const PUBLIC_PLAN_ORDER: PlanCode[] = ["FREE", "PREMIUM", "PREMIER"];
 
 export default async function BillingSettingsPage() {
   const session = await getServerSession(authOptions);
@@ -140,7 +135,7 @@ export default async function BillingSettingsPage() {
     <SettingsLayout
       current="/settings/billing"
       title="Billing & subscription"
-      description="Workspace plan, usage, and upgrade path."
+      description="Choose a plan that matches how you bill and remind clients. Paid workspace subscriptions and client checkout are processed securely with Razorpay."
     >
       <div className="space-y-6">
         <SubscriptionSuccessBanner />
@@ -186,9 +181,12 @@ export default async function BillingSettingsPage() {
                   : `Subscription ${entitlement.subscriptionStatus.toLowerCase()}`}
               </p>
             </div>
-            <button className="rounded-full bg-gradient-to-r from-primary via-emerald-500 to-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
-              Manage subscription
-            </button>
+            <Link
+              href="#workspace-plans"
+              className="inline-flex rounded-full bg-gradient-to-r from-primary via-emerald-500 to-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:opacity-95"
+            >
+              Compare plans
+            </Link>
           </div>
           <div className="mt-6 grid gap-4 sm:grid-cols-3">
             <div className="rounded-2xl border border-white/15 bg-white/80 p-4">
@@ -221,38 +219,12 @@ export default async function BillingSettingsPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          {PUBLIC_PLAN_ORDER.map((planCode) => {
-            const candidate = PLAN_DEFINITIONS[planCode];
-            const price = candidate.pricing.INR.yearly;
-            return (
-              <div
-                key={candidate.code}
-                className={`rounded-2xl border p-5 ${candidate.code === plan.code ? "border-primary bg-primary/5" : "border-white/20 bg-white/70"}`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-lg font-semibold">{candidate.name}</p>
-                    <p className="text-sm text-muted-foreground">{candidate.description}</p>
-                  </div>
-                  {candidate.badge ? (
-                    <span className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground">
-                      {candidate.badge}
-                    </span>
-                  ) : null}
-                </div>
-                <p className="mt-4 text-2xl font-bold">
-                  {price === 0 ? "Free" : `${formatMoney(price, "INR")} / yr`}
-                </p>
-                <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
-                  {candidate.highlights.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
+        <WorkspacePlanCards
+          currentPlanCode={plan.code}
+          canManageBilling={["OWNER", "ADMIN"].includes(membership?.role || "")}
+          razorpayConfigured={getRazorpayPublicConfig().isConfigured}
+          platformBypass={Boolean(entitlement.platformBypass)}
+        />
 
         <SubscriptionCancelCard
           canCancel={plan.code !== "FREE" && ["OWNER", "ADMIN"].includes(membership?.role || "")}

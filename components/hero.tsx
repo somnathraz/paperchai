@@ -11,6 +11,7 @@ import {
 
 import { motion, useMotionValue, useTransform, useInView } from "framer-motion";
 import { useRef } from "react";
+import Link from "next/link";
 import DashboardDemo from "./dashboard-demo";
 
 // --------------------------------------------------
@@ -134,31 +135,26 @@ export default function Hero() {
             transition={{ delay: 0.22, duration: 0.6 }}
           >
             {/* Primary */}
-            <motion.button
-              whileHover={{ scale: 1.05, y: -2 }}
-              whileTap={{ scale: 0.97 }}
-              className="relative group flex items-center justify-center gap-2 rounded-full px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-r from-primary via-emerald-500 to-primary text-white font-semibold shadow-[0_8px_32px_rgba(16,185,129,0.45)] text-sm sm:text-base"
-            >
-              <span className="relative z-10">Get started free</span>
-              <ArrowRight className="relative z-10 h-4 w-4 sm:h-5 sm:w-5 group-hover:translate-x-1 transition" />
-              {/* Shine */}
-              <motion.div
-                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/35 to-transparent rounded-full"
-                initial={{ x: "-120%" }}
-                whileHover={{ x: "120%" }}
-                transition={{ duration: 0.7 }}
-              />
-            </motion.button>
+            <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.97 }}>
+              <Link
+                href="/signup"
+                className="group relative flex items-center justify-center gap-2 rounded-full px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-r from-primary via-emerald-500 to-primary text-white font-semibold shadow-[0_8px_32px_rgba(16,185,129,0.45)] text-sm sm:text-base"
+              >
+                <span>Get started free</span>
+                <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5 transition group-hover:translate-x-1" />
+              </Link>
+            </motion.div>
 
             {/* Secondary */}
-            <motion.button
-              whileHover={{ scale: 1.05, y: -2 }}
-              whileTap={{ scale: 0.97 }}
-              className="relative flex items-center justify-center gap-2 rounded-full px-6 sm:px-8 py-3 sm:py-4 bg-white/70 backdrop-blur-xl border border-white/40 shadow-lg font-semibold text-foreground text-sm sm:text-base"
-            >
-              <PlayCircle className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
-              Watch 30s demo
-            </motion.button>
+            <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.97 }}>
+              <Link
+                href="#features"
+                className="relative flex items-center justify-center gap-2 rounded-full px-6 sm:px-8 py-3 sm:py-4 bg-white/70 backdrop-blur-xl border border-white/40 shadow-lg font-semibold text-foreground text-sm sm:text-base"
+              >
+                <PlayCircle className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+                Explore features
+              </Link>
+            </motion.div>
           </motion.div>
         </div>
 

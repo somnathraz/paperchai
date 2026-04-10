@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,35 +38,35 @@ export function FinalCTA({ className }: FinalCTAProps) {
         </h2>
 
         <p className="mx-auto max-w-xl text-muted-foreground">
-          Join 1,200+ freelancers who use PaperChai to track clients, send smart reminders, 
-          and get paid on time—without awkward follow-ups.
+          Join 1,200+ freelancers who use PaperChai to track clients, send smart reminders, and get
+          paid on time—without awkward follow-ups.
         </p>
 
         {/* CTA Buttons */}
         <div className="mt-6 flex flex-col justify-center gap-4 sm:flex-row">
-          <motion.a
-            href="/login"
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.97 }}
-            className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-primary to-emerald-500 px-8 py-3 text-sm font-semibold text-primary-foreground shadow-xl shadow-primary/40 hover:shadow-2xl transition"
-          >
-            Get started free
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </motion.a>
+          <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
+            <Link
+              href="/signup"
+              className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-primary to-emerald-500 px-8 py-3 text-sm font-semibold text-primary-foreground shadow-xl shadow-primary/40 hover:shadow-2xl transition"
+            >
+              Get started free
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Link>
+          </motion.div>
 
-          <motion.a
-            href="#features"
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.98 }}
-            className="inline-flex items-center justify-center rounded-full border border-primary/30 bg-primary/5 px-8 py-3 text-sm font-semibold text-primary shadow-md"
-          >
-            Explore features
-          </motion.a>
+          <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
+            <Link
+              href="/login"
+              className="inline-flex items-center justify-center rounded-full border border-primary/30 bg-primary/5 px-8 py-3 text-sm font-semibold text-primary shadow-md"
+            >
+              Sign in
+            </Link>
+          </motion.div>
         </div>
 
         {/* Mini trust statement */}
         <p className="text-xs text-muted-foreground pt-2">
-          No credit card required · Setup in 2 minutes · Safe for clients  
+          No credit card required · Setup in 2 minutes · Safe for clients
         </p>
       </motion.div>
     </section>

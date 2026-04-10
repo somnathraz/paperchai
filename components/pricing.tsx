@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { Check, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -142,25 +143,31 @@ export function Pricing({ className }: PricingProps) {
                 ))}
               </ul>
 
-              <motion.button
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                className={cn(
-                  "mt-6 w-full rounded-full px-6 py-3 text-sm font-semibold shadow-lg transition",
-                  plan.code !== "FREE"
-                    ? "bg-primary text-primary-foreground shadow-primary/30"
-                    : "border border-border bg-secondary text-foreground hover:border-primary/40"
-                )}
-              >
-                {plan.code === "FREE" ? "Start Free" : `Choose ${plan.name}`}
-              </motion.button>
+              <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} className="mt-6">
+                <Link
+                  href={
+                    plan.code === "FREE"
+                      ? "/signup"
+                      : `/login?callbackUrl=${encodeURIComponent("/settings/billing#workspace-plans")}`
+                  }
+                  className={cn(
+                    "flex w-full items-center justify-center rounded-full px-6 py-3 text-sm font-semibold shadow-lg transition",
+                    plan.code !== "FREE"
+                      ? "bg-primary text-primary-foreground shadow-primary/30"
+                      : "border border-border bg-secondary text-foreground hover:border-primary/40"
+                  )}
+                >
+                  {plan.code === "FREE" ? "Start Free" : `Choose ${plan.name}`}
+                </Link>
+              </motion.div>
             </motion.div>
           );
         })}
       </div>
 
       <p className="text-center text-sm text-muted-foreground">
-        No credit card required for Free. Upgrade per workspace when you need paid automations.
+        No credit card required for Free. Paid plans and client checkouts use Razorpay; upgrade per
+        workspace when you need full AI, reminders, and automations.
       </p>
     </section>
   );

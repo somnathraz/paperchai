@@ -56,13 +56,14 @@ export const PLAN_DEFINITIONS: Record<PlanCode, PlanDefinition> = {
   FREE: {
     code: "FREE",
     name: "Free",
-    description: "Core invoicing for solo users getting started.",
+    description:
+      "Core invoicing for freelancers getting started: PDF invoices, client limits, and a safe way to try automation and integrations—no card required.",
     highlights: [
-      "Up to 5 clients",
-      "10 invoices / month",
-      "Basic PDF invoices",
-      "1 automation rule to try",
-      "Notion import (10/day) · Slack read-only",
+      "Up to 5 clients · 10 invoices / month",
+      "Branded PDF invoices you can send with confidence",
+      "1 automation rule to try workflows",
+      "Notion import (10/day) and Slack (read-only) to explore",
+      "Upgrade anytime when you need AI, reminders, and full automation",
     ],
     pricing: {
       INR: { monthly: 0, yearly: 0 },
@@ -104,13 +105,15 @@ export const PLAN_DEFINITIONS: Record<PlanCode, PlanDefinition> = {
   PREMIUM: {
     code: "PREMIUM",
     name: "Premium",
-    description: "Automation and AI for solo professionals.",
+    description:
+      "The solo-pro sweet spot: AI-assisted copy, smart email + WhatsApp reminders, recurring invoices, reliability insight, and deeper Slack & Notion automation.",
     badge: "Most Popular",
     highlights: [
-      "Up to 50 clients",
-      "100 invoices / month",
-      "AI + reminders + recurring invoices",
-      "Slack and Notion integrations",
+      "Up to 50 clients · 100 invoices / month",
+      "AI + smart reminders in your tone (email & WhatsApp)",
+      "Recurring invoices, approvals, and custom branding",
+      "Higher automation, API access, and integration limits",
+      "Client payment links via Razorpay from the invoice editor",
     ],
     pricing: {
       INR: { monthly: 14900, yearly: 149000 },
@@ -152,12 +155,14 @@ export const PLAN_DEFINITIONS: Record<PlanCode, PlanDefinition> = {
   PREMIER: {
     code: "PREMIER",
     name: "Premier",
-    description: "Team-ready invoicing with higher limits and collaboration.",
+    description:
+      "Built for small teams: unlimited invoices, clients, and projects, with room for everyone to collaborate, approve, and run automations at scale.",
     highlights: [
-      "5 team members included",
+      "5 workspace members included",
       "Unlimited invoices, clients, and projects",
-      "Higher AI and automation limits",
-      "Team approvals and collaboration",
+      "Higher AI, reminder, and automation ceilings",
+      "Team approvals, shared visibility, same Razorpay payment flow",
+      "Priority-style limits for imports, API, and file sizes",
     ],
     pricing: {
       INR: { monthly: 49900, yearly: 499000 },
@@ -213,4 +218,18 @@ export function normalizePlanCode(code?: string | null): PlanCode {
 
 export function getPlanDefinition(code?: string | null): PlanDefinition {
   return PLAN_DEFINITIONS[normalizePlanCode(code)];
+}
+
+const PLAN_TIER_ORDER: PlanCode[] = ["FREE", "PREMIUM", "PREMIER"];
+
+export function planTier(code: PlanCode): number {
+  return PLAN_TIER_ORDER.indexOf(code);
+}
+
+export function isPlanUpgrade(from: PlanCode, to: PlanCode): boolean {
+  return planTier(to) > planTier(from);
+}
+
+export function isPlanDowngrade(from: PlanCode, to: PlanCode): boolean {
+  return planTier(to) < planTier(from);
 }
