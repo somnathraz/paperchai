@@ -6,12 +6,9 @@ import { authOptions } from "@/lib/auth";
 import { SettingsLayout } from "@/components/settings/settings-layout";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace, getWorkspaceMembership } from "@/lib/workspace";
-import {
-  BILLING_CURRENCIES,
-  PLAN_DEFINITIONS,
-  PlanCode,
-  getPlanDefinition,
-} from "@/lib/billing/plans";
+import { BILLING_CURRENCIES, PlanCode, getPlanDefinition } from "@/lib/billing/plans";
+import { WorkspacePlanCards } from "@/components/settings/workspace-plan-cards";
+import { getRazorpayPublicConfig } from "@/lib/payments/razorpay";
 import { getWorkspaceEntitlement } from "@/lib/entitlements";
 import { deriveSubscriptionPeriodEnd, calculateProratedRefund } from "@/lib/billing/cancellation";
 import { SubscriptionCancelCard } from "@/components/settings/subscription-cancel-card";
@@ -30,7 +27,8 @@ function formatMoney(amount: number, currency: string) {
   }).format(amount / 100);
 }
 
-const PUBLIC_PLAN_ORDER: PlanCode[] = ["FREE", "PREMIUM", "PREMIER"];
+const refundReadiness = getRefundProviderReadiness();
+const razorpayConfig = getRazorpayPublicConfig();
 
 export default async function BillingSettingsPage() {
   const session = await getServerSession(authOptions);
@@ -221,38 +219,12 @@ export default async function BillingSettingsPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          {PUBLIC_PLAN_ORDER.map((planCode) => {
-            const candidate = PLAN_DEFINITIONS[planCode];
-            const price = candidate.pricing.INR.yearly;
-            return (
-              <div
-                key={candidate.code}
-                className={`rounded-2xl border p-5 ${candidate.code === plan.code ? "border-primary bg-primary/5" : "border-white/20 bg-white/70"}`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-lg font-semibold">{candidate.name}</p>
-                    <p className="text-sm text-muted-foreground">{candidate.description}</p>
-                  </div>
-                  {candidate.badge ? (
-                    <span className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground">
-                      {candidate.badge}
-                    </span>
-                  ) : null}
-                </div>
-                <p className="mt-4 text-2xl font-bold">
-                  {price === 0 ? "Free" : `${formatMoney(price, "INR")} / yr`}
-                </p>
-                <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
-                  {candidate.highlights.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
+        <WorkspacePlanCards
+          currentPlanCode={plan.code as PlanCode}
+          canManageBilling={["OWNER", "ADMIN"].includes(membership?.role || "")}
+          razorpayConfigured={razorpayConfig.isConfigured}
+          platformBypass={entitlement.platformBypass}
+        />
 
         <SubscriptionCancelCard
           canCancel={plan.code !== "FREE" && ["OWNER", "ADMIN"].includes(membership?.role || "")}
@@ -286,4 +258,3 @@ export default async function BillingSettingsPage() {
     </SettingsLayout>
   );
 }
-const refundReadiness = getRefundProviderReadiness();

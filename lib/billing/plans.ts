@@ -214,3 +214,17 @@ export function normalizePlanCode(code?: string | null): PlanCode {
 export function getPlanDefinition(code?: string | null): PlanDefinition {
   return PLAN_DEFINITIONS[normalizePlanCode(code)];
 }
+
+const PLAN_TIER_ORDER: PlanCode[] = ["FREE", "PREMIUM", "PREMIER"];
+
+export function planTier(code: PlanCode): number {
+  return PLAN_TIER_ORDER.indexOf(code);
+}
+
+export function isPlanUpgrade(from: PlanCode, to: PlanCode): boolean {
+  return planTier(to) > planTier(from);
+}
+
+export function isPlanDowngrade(from: PlanCode, to: PlanCode): boolean {
+  return planTier(to) < planTier(from);
+}

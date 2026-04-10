@@ -143,6 +143,7 @@ export async function POST(req: NextRequest) {
 
       await prisma.auditLog.create({
         data: {
+          userId: "SYSTEM",
           workspaceId,
           action: "BILLING_SUBSCRIPTION_UPGRADED",
           resourceType: "BILLING_SUBSCRIPTION",
