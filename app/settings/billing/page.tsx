@@ -19,6 +19,7 @@ import { BillingRefundBanner } from "@/components/settings/billing-refund-banner
 import { BillingEventsCard } from "@/components/settings/billing-events-card";
 import { BillingRefundActionsCard } from "@/components/settings/billing-refund-actions-card";
 import { getRefundProviderReadiness } from "@/lib/billing/provider-refunds";
+import { SubscriptionSuccessBanner } from "@/components/settings/subscription-success-banner";
 
 function formatMoney(amount: number, currency: string) {
   return new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-US", {
@@ -142,6 +143,7 @@ export default async function BillingSettingsPage() {
       description="Workspace plan, usage, and upgrade path."
     >
       <div className="space-y-6">
+        <SubscriptionSuccessBanner />
         <BillingRefundBanner
           cancellation={
             latestCancellation && latestCancellationMeta?.cancelledAt
