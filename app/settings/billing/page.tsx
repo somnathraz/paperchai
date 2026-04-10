@@ -37,6 +37,7 @@ export default async function BillingSettingsPage() {
   if (!workspace) {
     redirect("/dashboard");
   }
+  const refundReadiness = getRefundProviderReadiness();
 
   const [
     membership,
