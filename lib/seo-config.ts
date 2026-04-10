@@ -160,9 +160,9 @@ export const defaultMetadata: Metadata = {
     creator: siteConfig.twitterHandle,
   },
   icons: {
-    icon: "/favicon.png",
+    icon: [{ url: "/favicon.png", sizes: "512x512", type: "image/png" }],
     shortcut: "/favicon.png",
-    apple: "/favicon.png",
+    apple: "/apple-touch-icon.png",
   },
   manifest: "/site.webmanifest",
 };

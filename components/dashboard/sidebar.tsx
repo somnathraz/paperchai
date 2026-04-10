@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import Image from "next/image";
 import {
   Home,
   FileText,
@@ -44,7 +44,13 @@ export function SidebarContent({
       className={`relative flex min-h-full w-full max-w-full flex-col overflow-x-hidden bg-white/80/70 py-6 backdrop-blur-xl ${className}`}
     >
       <div className="flex items-center gap-3 px-6">
-        <img src="/favicon.png" alt="PaperChai Icon" className="h-12 w-12 rounded-xl" />
+        <Image
+          src="/logo.png"
+          alt="PaperChai"
+          width={500}
+          height={500}
+          className="h-12 w-12 rounded-xl object-contain"
+        />
         <div>
           <p className="text-[11px] uppercase tracking-[0.26em] text-muted-foreground">PaperChai</p>
           <p className="text-sm font-semibold">Workspace</p>

@@ -61,7 +61,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       ? chromium.args // includes --no-sandbox, --disable-dev-shm-usage, etc.
       : ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
     executablePath,
-    headless: isProduction ? chromium.headless : true,
+    headless: true,
     protocolTimeout: PDF_TIMEOUT_MS,
   });
 

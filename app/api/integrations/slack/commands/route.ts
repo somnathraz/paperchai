@@ -23,7 +23,8 @@ import {
   isProviderAuthError,
   markIntegrationConnectionError,
 } from "@/lib/integrations/connection-health";
-import { assertWorkspaceFeature } from "@/lib/entitlements";
+import { assertWorkspaceFeature, serializeEntitlementError } from "@/lib/entitlements";
+import { assertLimit } from "@/lib/usage";
 
 type SlackActor = {
   internalUserId: string;
@@ -573,6 +574,21 @@ export async function POST(request: NextRequest) {
     const rate = command.rate && command.rate > 0 ? command.rate : amount / quantity;
     const subtotal = Number((quantity * rate).toFixed(2));
     const currency = command.currency || "INR";
+    // Enforce invoice quota (free plan: 10/month, also enforces Slack invoice limit)
+    try {
+      await assertLimit(connection.workspaceId, actor.internalUserId, "invoicesPerMonth");
+    } catch (err) {
+      const serialized = serializeEntitlementError(err);
+      const limit = (serialized?.body as { limit?: number } | undefined)?.limit;
+      await finalizeCommandEvent(event.id, "REJECTED", command, "Invoice limit reached");
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: serialized
+          ? `Invoice limit reached for your plan (${limit ?? "—"} invoices/month). Upgrade at paperchai.com/settings/billing.`
+          : "Invoice limit reached. Upgrade your plan to create more invoices.",
+      });
+    }
+
     const MAX_INVOICE_CREATE_ATTEMPTS = 3;
     let invoice: {
       id: string;
