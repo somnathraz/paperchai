@@ -36,22 +36,26 @@ export function ProfileSheet({ displayName, initials, email, role }: ProfileShee
   const [mounted, setMounted] = useState(false);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [hasFetched, setHasFetched] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
-    if (open && !profile && !loading) {
+    if (open && !hasFetched && !loading) {
       setLoading(true);
       fetch("/api/profile")
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
           if (data) setProfile(data);
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          setLoading(false);
+          setHasFetched(true);
+        });
     }
-  }, [open, profile, loading]);
+  }, [open, hasFetched, loading]);
 
   const mergedDisplayName = profile?.name || displayName;
   const mergedEmail = profile?.email || email || null;
@@ -75,11 +79,16 @@ export function ProfileSheet({ displayName, initials, email, role }: ProfileShee
       {mounted && open
         ? createPortal(
             <div className="fixed inset-0 z-50 flex">
-              <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm" onClick={() => setOpen(false)} />
+              <div
+                className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm"
+                onClick={() => setOpen(false)}
+              />
               <aside className="ml-auto flex h-full w-full max-w-xl flex-col gap-6 overflow-y-auto border-l border-white/20 bg-gradient-to-b from-white/95 via-[#f7f9fd] to-white/90 p-6 shadow-[0_30px_120px_rgba(15,23,42,0.25)] backdrop-blur-2xl">
                 <header className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Profile</p>
+                    <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+                      Profile
+                    </p>
                     <h2 className="text-2xl font-semibold text-foreground">{mergedDisplayName}</h2>
                   </div>
                   <button
@@ -124,7 +133,11 @@ export function ProfileSheet({ displayName, initials, email, role }: ProfileShee
                     <LogOut className="h-4 w-4" />
                     Sign out
                   </button>
-                  {loading && <p className="text-center text-sm text-muted-foreground">Refreshing profile...</p>}
+                  {loading && (
+                    <p className="text-center text-sm text-muted-foreground">
+                      Refreshing profile...
+                    </p>
+                  )}
                 </div>
               </aside>
             </div>,
