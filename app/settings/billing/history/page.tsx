@@ -76,7 +76,7 @@ export default async function BillingHistoryPage() {
 
   return (
     <SettingsLayout
-      current="/settings/billing"
+      current="/settings/billing/history"
       title="Billing history"
       description="Past payments, plan changes, and refunds."
     >
