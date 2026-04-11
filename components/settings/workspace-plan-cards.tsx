@@ -33,15 +33,17 @@ type WorkspacePlanCardsProps = {
   canManageBilling: boolean;
   razorpayConfigured: boolean;
   platformBypass: boolean;
+  onUpgradeSuccess?: (planCode: string) => void;
 };
 
-export function WorkspacePlanCards({
-  currentPlanCode,
-  hasActivePaidPlan,
-  canManageBilling,
-  razorpayConfigured,
-  platformBypass,
-}: WorkspacePlanCardsProps) {
+export function WorkspacePlanCards(props: WorkspacePlanCardsProps) {
+  const {
+    currentPlanCode,
+    hasActivePaidPlan,
+    canManageBilling,
+    razorpayConfigured,
+    platformBypass,
+  } = props;
   const router = useRouter();
   const [yearly, setYearly] = useState(true);
   const [currency, setCurrency] = useState<(typeof BILLING_CURRENCIES)[number]>("INR");
@@ -94,10 +96,14 @@ export function WorkspacePlanCards({
             if (activateRes.ok) {
               const upgradedCode =
                 (activatePayload as { planCode?: string }).planCode || String(target);
-              notifyBillingUpgradeSuccess(upgradedCode);
               toast.success("Plan activated! Your new features are ready.");
               setLoadingPlan(null);
-              router.refresh();
+              if (props.onUpgradeSuccess) {
+                props.onUpgradeSuccess(upgradedCode);
+              } else {
+                notifyBillingUpgradeSuccess(upgradedCode);
+                router.refresh();
+              }
             } else {
               toast.success("Payment done! Your plan will activate shortly.", {
                 description:
@@ -105,7 +111,11 @@ export function WorkspacePlanCards({
                   "Refreshing to pick up the latest subscription…",
               });
               setLoadingPlan(null);
-              router.refresh();
+              if (props.onUpgradeSuccess) {
+                props.onUpgradeSuccess(String(target));
+              } else {
+                router.refresh();
+              }
             }
           },
           onFailure: () => {

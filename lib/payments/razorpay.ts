@@ -35,18 +35,27 @@ type RazorpayPaymentLinkResponse = {
 
 function getRazorpayConfig() {
   // Support multiple common env var naming conventions
-  const keyId =
+  const keyId = (
     process.env.RAZORPAY_KEY_ID ||
     process.env.RAZORPAY_API_KEY ||
     process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
-    process.env.NEXT_PUBLIC_RAZORPAY_API_KEY;
-  const keySecret =
-    process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || process.env.RAZORPAY_SECRECT; // typo alias kept for backward compat
+    process.env.NEXT_PUBLIC_RAZORPAY_API_KEY ||
+    process.env.RAZORPAY_KEY ||
+    ""
+  ).trim();
+  const keySecret = (
+    process.env.RAZORPAY_KEY_SECRET ||
+    process.env.RAZORPAY_SECRET ||
+    process.env.RAZORPAY_SECRECT || // typo alias kept for backward compat
+    process.env.RAZORPAY_API_SECRET ||
+    process.env.RAZORPAY_SECRET_KEY ||
+    ""
+  ).trim();
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
   return {
-    keyId,
-    keySecret,
+    keyId: keyId || undefined,
+    keySecret: keySecret || undefined,
     webhookSecret,
     isConfigured: Boolean(keyId && keySecret),
     isWebhookConfigured: Boolean(webhookSecret),
