@@ -13,7 +13,6 @@ import { getWorkspaceEntitlement } from "@/lib/entitlements";
 import { deriveSubscriptionPeriodEnd, calculateProratedRefund } from "@/lib/billing/cancellation";
 import { SubscriptionCancelCard } from "@/components/settings/subscription-cancel-card";
 import { BillingRefundBanner } from "@/components/settings/billing-refund-banner";
-import { BillingEventsCard } from "@/components/settings/billing-events-card";
 import { BillingRefundActionsCard } from "@/components/settings/billing-refund-actions-card";
 import { getRefundProviderReadiness } from "@/lib/billing/provider-refunds";
 import { SubscriptionSuccessBanner } from "@/components/settings/subscription-success-banner";
@@ -204,15 +203,6 @@ export default async function BillingSettingsPage() {
               createdAt: event.createdAt.toISOString(),
               metadata: (event.metadata as any) || null,
             }))}
-        />
-
-        <BillingEventsCard
-          events={billingEvents.map((event) => ({
-            id: event.id,
-            action: event.action,
-            createdAt: event.createdAt.toISOString(),
-            metadata: (event.metadata as any) || null,
-          }))}
         />
       </div>
     </SettingsLayout>

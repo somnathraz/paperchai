@@ -4,7 +4,6 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureActiveWorkspace } from "@/lib/workspace";
 import { SettingsLayout } from "@/components/settings/settings-layout";
-import { CheckCircle, XCircle, RefreshCw, ArrowUpCircle, Clock } from "lucide-react";
 
 function fmt(amount: number, currency: string) {
   return new Intl.NumberFormat("en-IN", {
@@ -22,24 +21,7 @@ function fmtDate(d: Date | string) {
   });
 }
 
-const ACTION_LABELS: Record<string, { label: string; color: string; icon: string }> = {
-  BILLING_SUBSCRIPTION_CANCELED: {
-    label: "Subscription cancelled",
-    color: "text-red-600",
-    icon: "cancel",
-  },
-  BILLING_REFUND_REQUESTED: { label: "Refund requested", color: "text-amber-600", icon: "refund" },
-  BILLING_SUBSCRIPTION_UPGRADED: {
-    label: "Plan upgraded",
-    color: "text-emerald-600",
-    icon: "upgrade",
-  },
-  BILLING_SUBSCRIPTION_CREATED: {
-    label: "Subscription created",
-    color: "text-emerald-600",
-    icon: "upgrade",
-  },
-};
+export const dynamic = "force-dynamic";
 
 export default async function BillingHistoryPage() {
   const session = await getServerSession(authOptions);
@@ -52,154 +34,76 @@ export default async function BillingHistoryPage() {
     redirect("/dashboard");
   }
 
-  const [billingAuditLogs, paymentEvents] = await Promise.all([
-    prisma.auditLog.findMany({
-      where: {
-        workspaceId: workspace.id,
-        action: { startsWith: "BILLING_" },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    }),
-    prisma.paymentEvent.findMany({
-      where: {
-        workspaceId: workspace.id,
-        status: { in: ["PAID", "PARTIAL"] },
-      },
-      include: {
-        invoice: { select: { number: true, currency: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    }),
-  ]);
+  // Only show completed subscription payments
+  const payments = await prisma.auditLog.findMany({
+    where: {
+      workspaceId: workspace.id,
+      action: "BILLING_SUBSCRIPTION_UPGRADED",
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
 
   return (
     <SettingsLayout
       current="/settings/billing/history"
       title="Billing history"
-      description="Past payments, plan changes, and refunds."
+      description="Your workspace subscription payments."
     >
-      <div className="space-y-6">
-        {/* Invoice payments */}
-        <div className="rounded-2xl border border-border/60 bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground mb-4">
-            Invoice payments received
-          </h2>
-          {paymentEvents.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No payments recorded yet.</p>
-          ) : (
-            <div className="divide-y divide-border/60">
-              {paymentEvents.map((evt) => {
-                const currency = evt.invoice?.currency || evt.currency || "INR";
-                const amount = evt.amount ? fmt(evt.amount, currency) : "—";
-                const isPartial = evt.status === "PARTIAL";
-                return (
-                  <div key={evt.id} className="flex items-center justify-between py-3 gap-4">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`flex h-8 w-8 items-center justify-center rounded-full ${
-                          isPartial ? "bg-amber-50" : "bg-emerald-50"
-                        }`}
-                      >
-                        <CheckCircle
-                          className={`h-4 w-4 ${isPartial ? "text-amber-500" : "text-emerald-500"}`}
-                        />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          {isPartial ? "Partial payment" : "Payment received"}
-                          {evt.invoice?.number ? ` · ${evt.invoice.number}` : ""}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {fmtDate(evt.createdAt)} · via {evt.provider}
-                        </p>
-                      </div>
-                    </div>
-                    <span
-                      className={`text-sm font-semibold tabular-nums ${
-                        isPartial ? "text-amber-600" : "text-emerald-600"
-                      }`}
-                    >
-                      +{amount}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Subscription & billing events */}
-        <div className="rounded-2xl border border-border/60 bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground mb-4">
-            Plan &amp; subscription activity
-          </h2>
-          {billingAuditLogs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No billing events recorded yet.</p>
-          ) : (
-            <div className="divide-y divide-border/60">
-              {billingAuditLogs.map((log) => {
-                const meta = (log.metadata || {}) as Record<string, any>;
-                const info = ACTION_LABELS[log.action] || {
-                  label: log.action.replace("BILLING_", "").replace(/_/g, " ").toLowerCase(),
-                  color: "text-foreground",
-                  icon: "default",
-                };
-                const Icon =
-                  info.icon === "cancel"
-                    ? XCircle
-                    : info.icon === "refund"
-                      ? RefreshCw
-                      : info.icon === "upgrade"
-                        ? ArrowUpCircle
-                        : Clock;
-                const iconBg =
-                  info.icon === "cancel"
-                    ? "bg-red-50"
-                    : info.icon === "refund"
-                      ? "bg-amber-50"
-                      : info.icon === "upgrade"
-                        ? "bg-emerald-50"
-                        : "bg-slate-50";
+      <div className="rounded-2xl border border-white/20 bg-white/70 shadow-sm overflow-hidden">
+        {payments.length === 0 ? (
+          <div className="px-6 py-12 text-center">
+            <p className="text-sm font-medium text-foreground">No payments yet</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Subscription payments will appear here once you upgrade.
+            </p>
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border/60 bg-muted/30">
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                  Date
+                </th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                  Plan
+                </th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                  Mode
+                </th>
+                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                  Amount
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {payments.map((p) => {
+                const meta = (p.metadata || {}) as Record<string, any>;
+                const amount = meta.amount || meta.amountPaise || 0;
+                const currency = meta.currency || "INR";
+                const interval = meta.interval === "year" ? "Yearly" : "Monthly";
+                const planCode = meta.planCode || "—";
+                const source = meta.activationSource === "manual_fix" ? "Manual" : "Razorpay";
 
                 return (
-                  <div key={log.id} className="flex items-start justify-between py-3 gap-4">
-                    <div className="flex items-start gap-3">
-                      <div
-                        className={`flex h-8 w-8 items-center justify-center rounded-full shrink-0 ${iconBg}`}
-                      >
-                        <Icon className={`h-4 w-4 ${info.color}`} />
-                      </div>
-                      <div>
-                        <p className={`text-sm font-medium capitalize ${info.color}`}>
-                          {info.label}
-                        </p>
-                        <p className="text-xs text-muted-foreground">{fmtDate(log.createdAt)}</p>
-                        {meta.previousPlanCode && meta.nextPlanCode && (
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {meta.previousPlanCode} → {meta.nextPlanCode}
-                          </p>
-                        )}
-                        {meta.refundableAmount != null && meta.refundableAmount > 0 && (
-                          <p className="text-xs text-amber-600 mt-0.5">
-                            Refund: {fmt(meta.refundableAmount, meta.currency || "INR")} ·{" "}
-                            {meta.refundStatus || "pending"}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  <tr key={p.id} className="hover:bg-muted/20 transition-colors">
+                    <td className="px-5 py-3.5 text-sm text-foreground whitespace-nowrap">
+                      {fmtDate(p.createdAt)}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span className="font-medium text-foreground">{planCode}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">{interval}</span>
+                    </td>
+                    <td className="px-5 py-3.5 text-sm text-muted-foreground">{source}</td>
+                    <td className="px-5 py-3.5 text-right font-semibold tabular-nums text-emerald-600">
+                      {amount > 0 ? fmt(amount, currency) : "—"}
+                    </td>
+                  </tr>
                 );
               })}
-            </div>
-          )}
-        </div>
-
-        <p className="text-xs text-muted-foreground text-center">
-          Cancellations are only allowed within 7 days of purchase. After 7 days, the current
-          billing period is non-refundable.
-        </p>
+            </tbody>
+          </table>
+        )}
       </div>
     </SettingsLayout>
   );
