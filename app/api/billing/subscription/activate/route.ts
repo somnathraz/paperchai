@@ -69,8 +69,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  // Support all common env var aliases for the key secret
+  const keySecret = (
+    process.env.RAZORPAY_KEY_SECRET ||
+    process.env.RAZORPAY_SECRET ||
+    process.env.RAZORPAY_SECRECT ||
+    process.env.RAZORPAY_API_SECRET ||
+    process.env.RAZORPAY_SECRET_KEY ||
+    ""
+  ).trim();
+
   if (!keySecret) {
+    console.error("[activate] RAZORPAY_KEY_SECRET not set — cannot verify signature");
     return NextResponse.json({ error: "Payment gateway not configured" }, { status: 503 });
   }
 
@@ -93,11 +103,18 @@ export async function POST(req: NextRequest) {
     let valid = false;
     try {
       valid = verifyRazorpaySubscriptionSignature({ paymentId, subscriptionId, signature });
-    } catch {
+    } catch (err) {
+      console.error("[activate] Signature verification threw:", err);
       return NextResponse.json({ error: "Signature verification failed" }, { status: 503 });
     }
 
     if (!valid) {
+      console.error(
+        "[activate] Invalid signature for subscription",
+        subscriptionId,
+        "payment",
+        paymentId
+      );
       return NextResponse.json(
         { error: "Invalid subscription payment signature" },
         { status: 401 }

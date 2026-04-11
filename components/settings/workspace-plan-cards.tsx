@@ -105,17 +105,15 @@ export function WorkspacePlanCards(props: WorkspacePlanCardsProps) {
                 router.refresh();
               }
             } else {
-              toast.success("Payment done! Your plan will activate shortly.", {
+              // Activation failed — do NOT show celebration, just toast + refresh
+              const errMsg = (activatePayload as { error?: string }).error || "";
+              toast.error("Payment received but plan activation failed.", {
                 description:
-                  (activatePayload as { error?: string }).error ||
-                  "Refreshing to pick up the latest subscription…",
+                  errMsg || "Please refresh the page. Contact support if plan doesn't update.",
+                duration: 8000,
               });
               setLoadingPlan(null);
-              if (props.onUpgradeSuccess) {
-                props.onUpgradeSuccess(String(target));
-              } else {
-                router.refresh();
-              }
+              router.refresh();
             }
           },
           onFailure: () => {
